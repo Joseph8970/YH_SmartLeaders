@@ -547,7 +547,6 @@ def self.show_part?(name, scene)
     return true if name.include?('_VS')
     return true if name.include?('_DR')
     return true if name.include?('_DW')
-    return true if name.include?('_SH')
 
     return false
 
