@@ -166,14 +166,10 @@ old = cabinet.entities.grep(Sketchup::Group).find { |g|
 
     leader_group_name = "YH_LEADERS_#{scene_name}"
 
-leaders_group = cabinet.entities.add_group
-leaders_group.name = leader_group_name
 if scene_name.include?('ELEV_NO_DOORS')
   leader_tag_name = 'TAG_ASM_ELEV_NO_DOORS'
-
 elsif scene_name.include?('ELEV')
   leader_tag_name = 'TAG_ASM_ELEV'
-
 else
   leader_tag_name = 'TAG_ASM_PLAN'
 end
@@ -184,8 +180,8 @@ unless leader_tag
   leader_tag = model.layers.add(leader_tag_name)
 end
 
-leaders_group.layer = leader_tag
-    ents = leaders_group.entities
+    # Text entities must live at model top level to display correctly
+    ents = model.entities
 
     cabinet_parts =
       cabinet.entities.grep(Sketchup::ComponentInstance)
@@ -233,9 +229,12 @@ if scene_name.include?('PLAN')
     bb.max.z
   )
 
-  line_pt = center.offset(X_AXIS.reverse, offset)
+  rp_extra = s[:rp_extra_offset].inch
 
-  text_pt = line_pt.offset(X_AXIS.reverse, text_gap)
+  text_pt  = center.offset(X_AXIS.reverse, offset + rp_extra)
+
+  # line_pt is to the RIGHT of text_pt (approximating where text ends)
+  line_pt  = text_pt.offset(X_AXIS, text_gap)
   
 
   when /_BK$/
@@ -490,40 +489,17 @@ end
 next unless center
   next unless text_pt
 
-  leader_pt = defined?(line_pt) && line_pt ? line_pt : text_pt
+  line_pt = nil
 
-ents.add_line(center, leader_pt)
+  # Transform points from cabinet local space to world space
+  t = cabinet.transformation
+  world_center  = center.transform(t)
+  world_text_pt = text_pt.transform(t)
 
-if scene_name.include?('ELEV')
-
-  draw_arrow(
-    ents,
-    center,
-    leader_pt,
-    Y_AXIS,
-    s[:arrow_size].inch
-  )
-
-else
-
-  draw_arrow(
-    ents,
-    center,
-    leader_pt,
-    Z_AXIS,
-    s[:arrow_size].inch
-
-  )
-
-end
-
-line_pt = nil
-
-  # Text
-  ents.add_text(
-    part_name,
-    text_pt
-  )
+  # Native SketchUp leader: arrow at component, text at world text position
+  leader_vector = world_center.vector_to(world_text_pt)
+  txt = ents.add_text(part_name, world_center, leader_vector)
+  txt.layer = leader_tag if txt
 
 end
 
