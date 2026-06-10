@@ -477,18 +477,51 @@ def self.generate_assembly_scenes
     return
   end
 
-  # Ask user for a scene prefix (e.g. A, B, KC)
-  result = UI.inputbox(
-    ['Scene name (e.g. A, B, KC)'],
-    ['A'],
-    'Cabinet Scene Name'
-  )
+  # Combined bounding box
+  combined_bb = Geom::BoundingBox.new
+  sel.each { |cab| combined_bb.add(cab.bounds.min, cab.bounds.max) }
+
+  bb_min_z  = combined_bb.min.z
+  bb_max_z  = combined_bb.max.z
+  mid_z_in  = (((bb_min_z + bb_max_z) / 2.0) / 1.0.inch).round(2)
+
+  # Detect base vs upper split: assume midpoint of full Z range
+  split_z   = (bb_min_z + bb_max_z) / 2.0
+  base_mid  = (((bb_min_z + split_z) / 2.0) / 1.0.inch).round(2)
+  upper_mid = (((split_z + bb_max_z) / 2.0) / 1.0.inch).round(2)
+
+  cab_names = sel.map(&:name).join(', ')
+
+  # ── Step 1: Scene prefix + section heights ──────────────────────────
+  prompts  = [
+    'Scene name (e.g. A, B, KC)',
+    'Base section cut height (inches)',
+    'Upper section cut height (inches)',
+    'Number of vertical sections'
+  ]
+  defaults = ['A', base_mid.to_s, upper_mid.to_s, '1']
+  result   = UI.inputbox(prompts, defaults, 'Cabinet Scene Settings')
   return unless result
 
-  prefix = result[0].to_s.strip.upcase
+  prefix       = result[0].to_s.strip.upcase
+  base_cut_z   = result[1].to_f.inch
+  upper_cut_z  = result[2].to_f.inch
+  num_vsections = result[3].to_i.clamp(0, 10)
+
   if prefix.empty?
     UI.messagebox("Please enter a valid scene name.")
     return
+  end
+
+  # ── Step 2: Vertical section targets ────────────────────────────────
+  vsection_targets = []
+
+  if num_vsections > 0
+    v_prompts  = (1..num_vsections).map { |i| "Section #{i} — cabinet name" }
+    v_defaults = (1..num_vsections).map { |i| sel[i - 1]&.name.to_s }
+    v_result   = UI.inputbox(v_prompts, v_defaults, 'Vertical Section Targets')
+    return unless v_result
+    vsection_targets = v_result.map(&:to_s)
   end
 
   model.start_operation("Generate Cabinet Scenes", true)
@@ -498,18 +531,20 @@ def self.generate_assembly_scenes
   tag_no_doors    = model.layers["TAG_ASM_ELEV_NO_DOORS"] || model.layers.add("TAG_ASM_ELEV_NO_DOORS")
   tag_3d          = model.layers["TAG_ASM_3D"]            || model.layers.add("TAG_ASM_3D")
   tag_3d_no_doors = model.layers["TAG_ASM_3D_NO_DOORS"]   || model.layers.add("TAG_ASM_3D_NO_DOORS")
+  tag_section     = model.layers["TAG_ASM_SECTION"]       || model.layers.add("TAG_ASM_SECTION")
 
   doors_tag   = model.layers["TAG_DOORS"]
   drawers_tag = model.layers["TAG_DRAWERS"]
 
-  view = model.active_view
-  cam  = view.camera
-
-  # Compute combined bounding box of all selected cabinets
-  combined_bb = Geom::BoundingBox.new
-  sel.each { |cab| combined_bb.add(cab.bounds.min, cab.bounds.max) }
-
+  view   = model.active_view
+  cam    = view.camera
   center = combined_bb.center
+
+  def self.make_scene(model, name, pages_ref)
+    model.pages.erase(model.pages[name]) if model.pages[name]
+    model.pages.add(name)
+    puts "CREATED: #{name}"
+  end
 
   # ── ELEV ────────────────────────────────────────────────────────────
   cam.perspective = false
@@ -522,11 +557,9 @@ def self.generate_assembly_scenes
   tag_no_doors.visible    = false
   tag_3d.visible          = false
   tag_3d_no_doors.visible = false
+  tag_section.visible     = false
 
-  elev_scene = "#{prefix}_ELEV"
-  model.pages.erase(model.pages[elev_scene]) if model.pages[elev_scene]
-  model.pages.add(elev_scene)
-  puts "CREATED: #{elev_scene}"
+  make_scene(model, "#{prefix}_ELEV", nil)
 
   # ── ELEV_NO_DOORS ────────────────────────────────────────────────────
   doors_tag.visible   = false if doors_tag
@@ -535,18 +568,15 @@ def self.generate_assembly_scenes
   tag_no_doors.visible    = true
   tag_3d.visible          = false
   tag_3d_no_doors.visible = false
+  tag_section.visible     = false
 
-  elev_nd_scene = "#{prefix}_ELEV_NO_DOORS"
-  model.pages.erase(model.pages[elev_nd_scene]) if model.pages[elev_nd_scene]
-  model.pages.add(elev_nd_scene)
-  puts "CREATED: #{elev_nd_scene}"
+  make_scene(model, "#{prefix}_ELEV_NO_DOORS", nil)
 
   # ── 3D ───────────────────────────────────────────────────────────────
   cam.perspective = true
   cam.set(
     center.offset(Geom::Vector3d.new(-1, -1, 0.6).normalize, 5000),
-    center,
-    Z_AXIS
+    center, Z_AXIS
   )
   view.zoom_extents
 
@@ -556,11 +586,9 @@ def self.generate_assembly_scenes
   tag_no_doors.visible    = false
   tag_3d.visible          = true
   tag_3d_no_doors.visible = false
+  tag_section.visible     = false
 
-  scene_3d = "#{prefix}_3D"
-  model.pages.erase(model.pages[scene_3d]) if model.pages[scene_3d]
-  model.pages.add(scene_3d)
-  puts "CREATED: #{scene_3d}"
+  make_scene(model, "#{prefix}_3D", nil)
 
   # ── 3D_NO_DOORS ──────────────────────────────────────────────────────
   doors_tag.visible   = false if doors_tag
@@ -569,11 +597,102 @@ def self.generate_assembly_scenes
   tag_no_doors.visible    = false
   tag_3d.visible          = false
   tag_3d_no_doors.visible = true
+  tag_section.visible     = false
 
-  scene_3d_nd = "#{prefix}_3D_NO_DOORS"
-  model.pages.erase(model.pages[scene_3d_nd]) if model.pages[scene_3d_nd]
-  model.pages.add(scene_3d_nd)
-  puts "CREATED: #{scene_3d_nd}"
+  make_scene(model, "#{prefix}_3D_NO_DOORS", nil)
+
+  # ── SECTION_BASE (horizontal cut through base cabinets) ───────────────
+  cam.perspective = false
+
+  base_eye    = Geom::Point3d.new(center.x, center.y, base_cut_z + 5000)
+  base_target = Geom::Point3d.new(center.x, center.y, base_cut_z)
+  cam.set(base_eye, base_target, Y_AXIS)
+  view.zoom_extents
+
+  # Create/replace section plane for base cut
+  old_base_sp = model.entities.grep(Sketchup::SectionPlane).find { |sp|
+    sp.get_attribute('YH_SMART_LEADERS', 'section') == "#{prefix}_BASE"
+  }
+  old_base_sp.erase! if old_base_sp&.valid?
+
+  base_sp = model.entities.add_section_plane(
+    [center.x, center.y, base_cut_z],
+    [0, 0, 1]
+  )
+  base_sp.set_attribute('YH_SMART_LEADERS', 'section', "#{prefix}_BASE")
+  model.active_section_plane = base_sp
+
+  doors_tag.visible   = true if doors_tag
+  drawers_tag.visible = true if drawers_tag
+  tag_elev.visible        = false
+  tag_no_doors.visible    = false
+  tag_3d.visible          = false
+  tag_3d_no_doors.visible = false
+  tag_section.visible     = true
+
+  make_scene(model, "#{prefix}_SECTION_BASE", nil)
+  model.active_section_plane = nil
+
+  # ── SECTION_UPPER (horizontal cut through upper cabinets) ─────────────
+  old_upper_sp = model.entities.grep(Sketchup::SectionPlane).find { |sp|
+    sp.get_attribute('YH_SMART_LEADERS', 'section') == "#{prefix}_UPPER"
+  }
+  old_upper_sp.erase! if old_upper_sp&.valid?
+
+  upper_sp = model.entities.add_section_plane(
+    [center.x, center.y, upper_cut_z],
+    [0, 0, 1]
+  )
+  upper_sp.set_attribute('YH_SMART_LEADERS', 'section', "#{prefix}_UPPER")
+  model.active_section_plane = upper_sp
+
+  upper_eye    = Geom::Point3d.new(center.x, center.y, upper_cut_z + 5000)
+  upper_target = Geom::Point3d.new(center.x, center.y, upper_cut_z)
+  cam.set(upper_eye, upper_target, Y_AXIS)
+  view.zoom_extents
+
+  tag_section.visible = true
+
+  make_scene(model, "#{prefix}_SECTION_UPPER", nil)
+  model.active_section_plane = nil
+
+  # ── VERTICAL SECTIONS (one per targeted cabinet) ──────────────────────
+  vsection_targets.each_with_index do |cab_name, i|
+
+    target_cab = sel.find { |c| c.name == cab_name }
+    unless target_cab
+      puts "Vertical section #{i + 1}: cabinet '#{cab_name}' not found, skipping"
+      next
+    end
+
+    cab_bb     = target_cab.bounds
+    cab_center = cab_bb.center
+
+    old_vsp = model.entities.grep(Sketchup::SectionPlane).find { |sp|
+      sp.get_attribute('YH_SMART_LEADERS', 'section') == "#{prefix}_V#{i + 1}"
+    }
+    old_vsp.erase! if old_vsp&.valid?
+
+    # Vertical plane cutting through cabinet center, perpendicular to X axis
+    vsp = model.entities.add_section_plane(
+      [cab_center.x, cab_center.y, cab_center.z],
+      [0, 1, 0]
+    )
+    vsp.set_attribute('YH_SMART_LEADERS', 'section', "#{prefix}_V#{i + 1}")
+    model.active_section_plane = vsp
+
+    # Camera: looking along Y axis at cabinet center
+    v_eye = Geom::Point3d.new(cab_center.x, cab_center.y - 5000, cab_center.z)
+    cam.perspective = false
+    cam.set(v_eye, cab_center, Z_AXIS)
+    view.zoom(target_cab)
+
+    tag_section.visible = true
+
+    make_scene(model, "#{prefix}_SECTION_V#{i + 1}", nil)
+    model.active_section_plane = nil
+
+  end
 
   # Restore visibility
   doors_tag.visible   = true if doors_tag
@@ -581,7 +700,8 @@ def self.generate_assembly_scenes
 
   model.commit_operation
 
-  UI.messagebox("4 scenes created: #{prefix}_ELEV, #{prefix}_ELEV_NO_DOORS, #{prefix}_3D, #{prefix}_3D_NO_DOORS")
+  total = 4 + 2 + vsection_targets.size
+  UI.messagebox("#{total} scenes created for prefix '#{prefix}'.")
 
 end
 
