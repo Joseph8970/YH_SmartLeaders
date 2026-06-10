@@ -814,9 +814,7 @@ end
   def self.add_layout_leaders(doc, page, layer, scene_name,
                                vp_x, vp_y, vp_w, vp_h,
                                cabinets, scale_denom, combined_bb,
-                               leader_vert: 0.15, leader_horiz: 0.15,
-                               leader_arrow_type: Layout::Style::ARROW_FILLED_TRIANGLE,
-                               leader_arrow_size: 0.25)
+                               leader_vert: 0.15, leader_horiz: 0.15)
     return [] if scene_name =~ /_3D(_NO_DOORS)?$/
 
     vp_cx      = vp_x + vp_w / 2.0
@@ -1010,15 +1008,6 @@ end
             end
           end
 
-          # Apply arrow at the component (target) end
-          begin
-            s = label.style
-            s.end_arrow_type = leader_arrow_type
-            s.end_arrow_size = leader_arrow_size
-            label.style = s
-          rescue => ae
-            puts "  arrow style err #{part_name}: #{ae.message}"
-          end
 
           doc.add_entity(label, layer, page)
           labels << label
@@ -1054,8 +1043,6 @@ end
     #   ARROW_FILLED_DIAMOND=11  ARROW_OPEN_DIAMOND=12
     #   ARROW_STAR=13  ARROW_T=14  ARROW_SLASH_RIGHT=15  ARROW_SLASH_LEFT=16
     #   ARROW_UNDERRUN=17  ARROW_OVERRUN=18
-    leader_arrow_type = Layout::Style::ARROW_FILLED_TRIANGLE  # arrow at component end
-    leader_arrow_size = 0.25  # minimum allowed by Layout is 0.25"
 
     result = UI.inputbox(
       ['Scene prefix (e.g. A, B, KC)',
@@ -1196,10 +1183,8 @@ end
             doc, page, layer,
             info[:scene], info[:x], info[:y], info[:w], info[:h],
             all_groups, scale_denom, combined_bb,
-            leader_vert:        leader_vert,
-            leader_horiz:       leader_horiz,
-            leader_arrow_type:  leader_arrow_type,
-            leader_arrow_size:  leader_arrow_size
+            leader_vert:  leader_vert,
+            leader_horiz: leader_horiz
           )
 
           # Group viewport + labels so they move together
