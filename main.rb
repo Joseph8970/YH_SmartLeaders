@@ -477,109 +477,119 @@ def self.generate_assembly_scenes
     return
   end
 
+  # Ask user for a scene prefix (e.g. A, B, KC)
+  result = UI.inputbox(
+    ['Scene name (e.g. A, B, KC)'],
+    ['A'],
+    'Cabinet Scene Name'
+  )
+  return unless result
+
+  prefix = result[0].to_s.strip.upcase
+  if prefix.empty?
+    UI.messagebox("Please enter a valid scene name.")
+    return
+  end
+
   model.start_operation("Generate Cabinet Scenes", true)
 
   # Ensure scene tags exist
-  tag_elev        = model.layers["TAG_ASM_ELEV"]        || model.layers.add("TAG_ASM_ELEV")
+  tag_elev        = model.layers["TAG_ASM_ELEV"]          || model.layers.add("TAG_ASM_ELEV")
   tag_no_doors    = model.layers["TAG_ASM_ELEV_NO_DOORS"] || model.layers.add("TAG_ASM_ELEV_NO_DOORS")
-  tag_3d          = model.layers["TAG_ASM_3D"]           || model.layers.add("TAG_ASM_3D")
-  tag_3d_no_doors = model.layers["TAG_ASM_3D_NO_DOORS"]  || model.layers.add("TAG_ASM_3D_NO_DOORS")
+  tag_3d          = model.layers["TAG_ASM_3D"]            || model.layers.add("TAG_ASM_3D")
+  tag_3d_no_doors = model.layers["TAG_ASM_3D_NO_DOORS"]   || model.layers.add("TAG_ASM_3D_NO_DOORS")
 
   doors_tag   = model.layers["TAG_DOORS"]
   drawers_tag = model.layers["TAG_DRAWERS"]
 
-  sel.each do |cabinet|
+  view = model.active_view
+  cam  = view.camera
 
-    cab_name = cabinet.name
-    puts "CABINET: #{cab_name}"
-
-    # Isolate this cabinet
-    sel.each { |c| c.hidden = true }
-    cabinet.hidden = false
-
-    view = model.active_view
-    cam  = view.camera
-
-    # ── ELEV (front, orthographic, doors+drawers visible) ──────────────
-    cam.perspective = false
-    cam.set(
-      cabinet.bounds.center.offset(Y_AXIS.reverse, 1000),
-      cabinet.bounds.center,
-      Z_AXIS
-    )
-    view.zoom(cabinet)
-
-    doors_tag.visible   = true if doors_tag
-    drawers_tag.visible = true if drawers_tag
-    tag_elev.visible        = true
-    tag_no_doors.visible    = false
-    tag_3d.visible          = false
-    tag_3d_no_doors.visible = false
-
-    elev_scene = "ASM_#{cab_name}_ELEV"
-    model.pages.erase(model.pages[elev_scene]) if model.pages[elev_scene]
-    model.pages.add(elev_scene)
-    puts "CREATED: #{elev_scene}"
-
-    # ── ELEV_NO_DOORS (front, orthographic, doors+drawers hidden) ──────
-    doors_tag.visible   = false if doors_tag
-    drawers_tag.visible = false if drawers_tag
-    tag_elev.visible        = false
-    tag_no_doors.visible    = true
-    tag_3d.visible          = false
-    tag_3d_no_doors.visible = false
-
-    elev_nd_scene = "ASM_#{cab_name}_ELEV_NO_DOORS"
-    model.pages.erase(model.pages[elev_nd_scene]) if model.pages[elev_nd_scene]
-    model.pages.add(elev_nd_scene)
-    puts "CREATED: #{elev_nd_scene}"
-
-    # ── 3D (perspective, all parts visible, no leaders) ────────────────
-    cam.perspective = true
-    cam.set(
-      cabinet.bounds.center.offset(Geom::Vector3d.new(-1, -1, 0.6).normalize, 1000),
-      cabinet.bounds.center,
-      Z_AXIS
-    )
-    view.zoom(cabinet)
-
-    doors_tag.visible   = true if doors_tag
-    drawers_tag.visible = true if drawers_tag
-    tag_elev.visible        = false
-    tag_no_doors.visible    = false
-    tag_3d.visible          = true
-    tag_3d_no_doors.visible = false
-
-    scene_3d = "ASM_#{cab_name}_3D"
-    model.pages.erase(model.pages[scene_3d]) if model.pages[scene_3d]
-    model.pages.add(scene_3d)
-    puts "CREATED: #{scene_3d}"
-
-    # ── 3D_NO_DOORS (perspective, doors+drawers hidden, no leaders) ────
-    doors_tag.visible   = false if doors_tag
-    drawers_tag.visible = false if drawers_tag
-    tag_elev.visible        = false
-    tag_no_doors.visible    = false
-    tag_3d.visible          = false
-    tag_3d_no_doors.visible = true
-
-    scene_3d_nd = "ASM_#{cab_name}_3D_NO_DOORS"
-    model.pages.erase(model.pages[scene_3d_nd]) if model.pages[scene_3d_nd]
-    model.pages.add(scene_3d_nd)
-    puts "CREATED: #{scene_3d_nd}"
-
-    puts "CABINET FINISHED: #{cab_name}"
-
+  # Compute combined bounding box of all selected cabinets
+  combined_bb = sel.reduce(nil) do |bb, cab|
+    cb = cab.bounds
+    if bb.nil?
+      cb
+    else
+      merged = Sketchup::BoundingBox.new
+      merged.add(bb.min, bb.max, cb.min, cb.max)
+      merged
+    end
   end
 
-  # Restore all
-  sel.each { |c| c.hidden = false }
+  center = combined_bb.center
+
+  # ── ELEV ────────────────────────────────────────────────────────────
+  cam.perspective = false
+  cam.set(center.offset(Y_AXIS.reverse, 5000), center, Z_AXIS)
+  view.zoom_extents
+
+  doors_tag.visible   = true if doors_tag
+  drawers_tag.visible = true if drawers_tag
+  tag_elev.visible        = true
+  tag_no_doors.visible    = false
+  tag_3d.visible          = false
+  tag_3d_no_doors.visible = false
+
+  elev_scene = "#{prefix}_ELEV"
+  model.pages.erase(model.pages[elev_scene]) if model.pages[elev_scene]
+  model.pages.add(elev_scene)
+  puts "CREATED: #{elev_scene}"
+
+  # ── ELEV_NO_DOORS ────────────────────────────────────────────────────
+  doors_tag.visible   = false if doors_tag
+  drawers_tag.visible = false if drawers_tag
+  tag_elev.visible        = false
+  tag_no_doors.visible    = true
+  tag_3d.visible          = false
+  tag_3d_no_doors.visible = false
+
+  elev_nd_scene = "#{prefix}_ELEV_NO_DOORS"
+  model.pages.erase(model.pages[elev_nd_scene]) if model.pages[elev_nd_scene]
+  model.pages.add(elev_nd_scene)
+  puts "CREATED: #{elev_nd_scene}"
+
+  # ── 3D ───────────────────────────────────────────────────────────────
+  cam.perspective = true
+  cam.set(
+    center.offset(Geom::Vector3d.new(-1, -1, 0.6).normalize, 5000),
+    center,
+    Z_AXIS
+  )
+  view.zoom_extents
+
+  doors_tag.visible   = true if doors_tag
+  drawers_tag.visible = true if drawers_tag
+  tag_elev.visible        = false
+  tag_no_doors.visible    = false
+  tag_3d.visible          = true
+  tag_3d_no_doors.visible = false
+
+  scene_3d = "#{prefix}_3D"
+  model.pages.erase(model.pages[scene_3d]) if model.pages[scene_3d]
+  model.pages.add(scene_3d)
+  puts "CREATED: #{scene_3d}"
+
+  # ── 3D_NO_DOORS ──────────────────────────────────────────────────────
+  doors_tag.visible   = false if doors_tag
+  drawers_tag.visible = false if drawers_tag
+  tag_elev.visible        = false
+  tag_no_doors.visible    = false
+  tag_3d.visible          = false
+  tag_3d_no_doors.visible = true
+
+  scene_3d_nd = "#{prefix}_3D_NO_DOORS"
+  model.pages.erase(model.pages[scene_3d_nd]) if model.pages[scene_3d_nd]
+  model.pages.add(scene_3d_nd)
+  puts "CREATED: #{scene_3d_nd}"
+
+  # Restore visibility
   doors_tag.visible   = true if doors_tag
   drawers_tag.visible = true if drawers_tag
 
   model.commit_operation
 
-  UI.messagebox("Scenes generated for #{sel.size} cabinet(s).")
+  UI.messagebox("4 scenes created: #{prefix}_ELEV, #{prefix}_ELEV_NO_DOORS, #{prefix}_3D, #{prefix}_3D_NO_DOORS")
 
 end
 
@@ -639,70 +649,7 @@ def self.generate_dimensions(cabinet, ents, leader_tag)
 end
 
 def self.generate_assembly_leaders
-
-  model = Sketchup.active_model
-
-  model.start_operation('Generate Assembly Leaders', true)
-
-  # Delete all previously generated leaders and dimensions
-  model.entities.select { |e|
-    e.is_a?(Sketchup::Text) && (
-      e.get_attribute('YH_SMART_LEADERS', 'scene') ||
-      e.get_attribute('YH_SMART_LEADERS', 'dim')
-    )
-  }.each { |e| e.erase! if e.valid? }
-
-  # Only process ELEV and ELEV_NO_DOORS — skip 3D scenes (no leaders/dims)
-  asm_pages = model.pages.select { |p|
-    p.name.start_with?('ASM_') &&
-    !p.name.end_with?('_3D') &&
-    !p.name.end_with?('_3D_NO_DOORS')
-  }
-
-  puts "SCENES TO ANNOTATE = #{asm_pages.size}"
-
-  asm_pages.each do |page|
-
-    puts "SCENE: #{page.name}"
-
-    model.pages.selected_page = page
-    page.update(255)
-
-    cab_name = page.name.split('_')[1]
-
-    cabinet = model.entities.grep(Sketchup::Group).find { |g|
-      g.name == cab_name
-    }
-
-    next unless cabinet
-
-    # Determine scene tag for this scene
-    leader_tag_name = if page.name.include?('ELEV_NO_DOORS')
-      'TAG_ASM_ELEV_NO_DOORS'
-    else
-      'TAG_ASM_ELEV'
-    end
-
-    leader_tag = model.layers[leader_tag_name] ||
-                 model.layers.add(leader_tag_name)
-
-    model.selection.clear
-    model.selection.add(cabinet)
-
-    # Generate leaders
-    self.generate
-
-    # Generate W × H × D dimensions outside the bounding box
-    self.generate_dimensions(cabinet, model.entities, leader_tag)
-
-    page.update(255)
-
-  end
-
-  model.commit_operation
-
-  UI.messagebox("Leaders and dimensions generated for #{asm_pages.size} scenes.")
-
+  UI.messagebox("Leaders and dimensions are generated automatically in Layout.\nUse 'Generate Assembly Package' to create the Layout file.")
 end
 
 
