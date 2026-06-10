@@ -813,7 +813,8 @@ end
   # Add Layout::Label leaders for visible parts in a scene viewport.
   def self.add_layout_leaders(doc, page, layer, scene_name,
                                vp_x, vp_y, vp_w, vp_h,
-                               cabinets, scale_denom, combined_bb)
+                               cabinets, scale_denom, combined_bb,
+                               leader_vert: 0.35, leader_horiz: 0.75)
     return [] if scene_name =~ /_3D(_NO_DOORS)?$/
 
     vp_cx      = vp_x + vp_w / 2.0
@@ -875,8 +876,9 @@ end
         # Dynamic text box width: ~0.068" per character, minimum 0.40"
         text_w = [part_name.to_s.length * 0.068 + 0.04, 0.40].max
 
-        elbow_drop = 0.35   # vertical distance arrow → elbow (inches on paper)
-        arrow_inset = 0.15  # arrow is this far INSIDE the door from the edge/divider
+        elbow_drop  = leader_vert    # vertical segment length (user-configurable)
+        horiz_run   = leader_horiz   # horizontal segment length (user-configurable)
+        arrow_inset = 0.10           # arrow inset from the divider edge into the door
 
         # path_pts: [arrow, elbow, text_connection] — set per part type below
         path_pts = nil
@@ -889,26 +891,28 @@ end
           elbow_y = arrow_py + elbow_drop   # elbow is BELOW the arrow
 
           if is_left_door
-            # Arrow inset from the divider INTO the left door panel.
-            # Leader: down to elbow, then LEFT to text near outer edge.
-            arrow_px = right_edge_px - arrow_inset
-            tx       = left_edge_px + 0.05
-            ty       = elbow_y - text_h / 2.0
+            # Arrow inset into left door; leader goes DOWN then LEFT by horiz_run.
+            arrow_px    = right_edge_px - arrow_inset
+            elbow_pt_x  = arrow_px
+            text_conn_x = arrow_px - horiz_run          # left end of horizontal run
+            tx          = text_conn_x - text_w          # text box left of connection
+            ty          = elbow_y - text_h / 2.0
             path_pts = [
-              [arrow_px, arrow_py],
-              [arrow_px, elbow_y],
-              [tx + text_w, elbow_y]   # connect to right edge of text box
+              [arrow_px,    arrow_py],
+              [elbow_pt_x,  elbow_y],
+              [text_conn_x, elbow_y]
             ]
           else
-            # Arrow inset from the divider INTO the right door panel.
-            # Leader: down to elbow, then RIGHT to text near outer edge.
-            arrow_px = left_edge_px + arrow_inset
-            tx       = right_edge_px - text_w - 0.05
-            ty       = elbow_y - text_h / 2.0
+            # Arrow inset into right door; leader goes DOWN then RIGHT by horiz_run.
+            arrow_px    = left_edge_px + arrow_inset
+            elbow_pt_x  = arrow_px
+            text_conn_x = arrow_px + horiz_run          # right end of horizontal run
+            tx          = text_conn_x                   # text box right of connection
+            ty          = elbow_y - text_h / 2.0
             path_pts = [
-              [arrow_px, arrow_py],
-              [arrow_px, elbow_y],
-              [tx, elbow_y]            # connect to left edge of text box
+              [arrow_px,    arrow_py],
+              [elbow_pt_x,  elbow_y],
+              [text_conn_x, elbow_y]
             ]
           end
 
@@ -926,18 +930,20 @@ end
           is_right_side = world_center.x >= cam_target.x
           elbow_y = arrow_py + elbow_drop
           if is_right_side
-            tx = px + 0.20
+            text_conn_x = arrow_px + horiz_run
+            tx = text_conn_x
             path_pts = [
               [arrow_px, arrow_py],
               [arrow_px, elbow_y],
-              [tx, elbow_y]
+              [text_conn_x, elbow_y]
             ]
           else
-            tx = px - text_w - 0.20
+            text_conn_x = arrow_px - horiz_run
+            tx = text_conn_x - text_w
             path_pts = [
               [arrow_px, arrow_py],
               [arrow_px, elbow_y],
-              [tx + text_w, elbow_y]
+              [text_conn_x, elbow_y]
             ]
           end
           ty = elbow_y - text_h / 2.0
@@ -994,19 +1000,23 @@ end
       return
     end
 
-    # ── Step 1: prefix + scale + leaders option ─────────────────────────
+    # ── Step 1: prefix + scale + leaders option + leader segment sizes ──
     result = UI.inputbox(
       ['Scene prefix (e.g. A, B, KC)',
        'Scale denominator (e.g. 20 for 1:20, 48 for 1/4"=1\')',
-       'Add part leaders? (Y / N)'],
-      ['A', '20', 'Y'],
+       'Add part leaders? (Y / N)',
+       'Leader vertical segment (inches on paper)',
+       'Leader horizontal segment (inches on paper)'],
+      ['A', '20', 'Y', '0.35', '0.75'],
       'Assembly Package'
     )
     return unless result
 
-    prefix      = result[0].to_s.strip.upcase
-    scale_denom = result[1].to_f
-    add_leaders = result[2].to_s.strip.upcase.start_with?('Y')
+    prefix          = result[0].to_s.strip.upcase
+    scale_denom     = result[1].to_f
+    add_leaders     = result[2].to_s.strip.upcase.start_with?('Y')
+    leader_vert     = result[3].to_f.clamp(0.05, 5.0)   # elbow drop
+    leader_horiz    = result[4].to_f.clamp(0.05, 5.0)   # horizontal run to text
 
     if scale_denom <= 0
       UI.messagebox("Invalid scale.")
@@ -1133,7 +1143,8 @@ end
           labels = add_layout_leaders(
             doc, page, layer,
             info[:scene], info[:x], info[:y], info[:w], info[:h],
-            all_groups, scale_denom, combined_bb
+            all_groups, scale_denom, combined_bb,
+            leader_vert: leader_vert, leader_horiz: leader_horiz
           )
 
           # Group viewport + labels so they move together
