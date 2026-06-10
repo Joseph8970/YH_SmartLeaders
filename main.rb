@@ -865,53 +865,91 @@ end
         next if px < vp_x || px > vp_x + vp_w || py < vp_y || py > vp_y + vp_h
 
         # ── Leader position rules ─────────────────────────────────────────
+        # Strategy: create a TWO_SEGMENT label then override leader_line with an
+        # explicit Layout::Path of 3 points (arrow → elbow → text-connection).
+        # This gives us a guaranteed 90-degree L instead of Layout guessing the bend.
+        #
+        #   arrow_pt  ──(vertical)──  elbow_pt  ──(horizontal)──  text_conn_pt
+        #
         arrow_px = px
         arrow_py = py
 
-        # Project part edges used for door arrow/text placement
         right_edge_px = proj_x(world_max, cam_target, vp_cx, scale_denom)
         left_edge_px  = proj_x(world_min, cam_target, vp_cx, scale_denom)
 
-        # All text is placed at the SAME paper-Y as the arrow so the leader is
-        # a purely horizontal line (SINGLE_SEGMENT). TWO_SEGMENT with any Y
-        # difference becomes a diagonal — avoid it for in-viewport labels.
-        leader_type = Layout::Label::LEADER_LINE_TYPE_SINGLE_SEGMENT
+        elbow_drop = 0.35   # vertical distance arrow → elbow (inches on paper)
+
+        # path_pts: [arrow, elbow, text_connection] — set per part type below
+        path_pts = nil
 
         case cat
         when :door
-          # Name suffix: 5_DR1L = left door, 5_DR1R = right door
           is_left_door = part_name =~ /L\d*$/i ||
                          (!part_name.match?(/R\d*$/i) && world_center.x < cam_target.x)
 
+          elbow_y = arrow_py + elbow_drop   # elbow is BELOW the arrow
+
           if is_left_door
-            # Arrow at divider (inner/right edge of left door).
-            # Text inside the door near the outer/left edge — leader points right.
-            arrow_px = right_edge_px
-            tx = left_edge_px + 0.05
+            # Arrow at divider (right/inner edge of left door).
+            # Leader goes DOWN then LEFT to text inside the door.
+            arrow_px   = right_edge_px
+            tx         = left_edge_px + 0.05
+            ty         = elbow_y - text_h / 2.0
+            # text connection point: right edge of text box at elbow height
+            path_pts = [
+              [arrow_px, arrow_py],
+              [arrow_px, elbow_y],
+              [tx + text_w, elbow_y]
+            ]
           else
-            # Arrow at divider (inner/left edge of right door).
-            # Text inside the door near the outer/right edge — leader points left.
-            arrow_px = left_edge_px
-            tx = right_edge_px - text_w - 0.05
+            # Arrow at divider (left/inner edge of right door).
+            # Leader goes DOWN then RIGHT to text inside the door.
+            arrow_px   = left_edge_px
+            tx         = right_edge_px - text_w - 0.05
+            ty         = elbow_y - text_h / 2.0
+            # text connection point: left edge of text box at elbow height
+            path_pts = [
+              [arrow_px, arrow_py],
+              [arrow_px, elbow_y],
+              [tx, elbow_y]
+            ]
           end
-          ty = py - text_h / 2.0   # same Y as arrow → guaranteed horizontal leader
 
         when :drawer
-          # Arrow at drawer centre; text to the LEFT at same height.
+          # Arrow at drawer centre; leader goes LEFT then TEXT (single horizontal).
           tx = px - text_w - 0.20
           ty = py - text_h / 2.0
+          path_pts = [
+            [arrow_px, arrow_py],
+            [tx + text_w, arrow_py]
+          ]
 
         else
-          # Structural parts: text to the less-crowded side at same height.
+          # Structural parts: leader goes DOWN then to the less-crowded side.
           is_right_side = world_center.x >= cam_target.x
-          tx = is_right_side ? px + 0.20 : px - text_w - 0.20
-          ty = py - text_h / 2.0
+          elbow_y = arrow_py + elbow_drop
+          if is_right_side
+            tx = px + 0.20
+            path_pts = [
+              [arrow_px, arrow_py],
+              [arrow_px, elbow_y],
+              [tx, elbow_y]
+            ]
+          else
+            tx = px - text_w - 0.20
+            path_pts = [
+              [arrow_px, arrow_py],
+              [arrow_px, elbow_y],
+              [tx + text_w, elbow_y]
+            ]
+          end
+          ty = elbow_y - text_h / 2.0
         end
 
-        # Clamp text box to stay within the viewport horizontally
+        # Clamp text box inside viewport horizontally
         tx = [[tx, vp_x + 0.02].max, vp_x + vp_w - text_w - 0.02].min
 
-        # Skip near-duplicate TEXT positions so L+R doors (same divider, opposite text) both appear
+        # Skip near-duplicate text positions
         next if placed_pts.any? { |ex, ey| (ex - tx).abs < 0.04 && (ey - ty).abs < 0.04 }
         placed_pts << [tx, ty]
 
@@ -921,10 +959,23 @@ end
         begin
           label = Layout::Label.new(
             part_name,
-            leader_type,
+            Layout::Label::LEADER_LINE_TYPE_TWO_SEGMENT,
             target_pt,
             text_bounds
           )
+
+          # Override the auto-generated leader with an explicit L-shaped path
+          if path_pts && path_pts.length >= 2
+            begin
+              pts = path_pts.map { |x, y| Geom::Point2d.new(x, y) }
+              lpath = Layout::Path.new(pts[0], pts[1])
+              pts[2..].each { |pt| lpath.append_point(pt) } if pts.length > 2
+              label.leader_line = lpath
+            rescue => pe
+              puts "  leader_line= err #{part_name}: #{pe.message}"
+            end
+          end
+
           doc.add_entity(label, layer, page)
           labels << label
           puts "  LABEL: #{part_name} @ arrow(#{arrow_px.round(2)},#{arrow_py.round(2)})"
