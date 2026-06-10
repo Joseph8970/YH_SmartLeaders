@@ -620,7 +620,8 @@ def self.generate_assembly_scenes
     [0, 0, 1]
   )
   base_sp.set_attribute('YH_SMART_LEADERS', 'section', "#{prefix}_BASE")
-  model.active_section_plane = base_sp
+  model.rendering_options['DisplaySectionPlanes'] = true
+  model.rendering_options['SectionCutHideFace']   = false
 
   doors_tag.visible   = true if doors_tag
   drawers_tag.visible = true if drawers_tag
@@ -631,7 +632,7 @@ def self.generate_assembly_scenes
   tag_section.visible     = true
 
   make_scene(model, "#{prefix}_SECTION_BASE", nil)
-  model.active_section_plane = nil
+  model.rendering_options['DisplaySectionPlanes'] = false
 
   # ── SECTION_UPPER (horizontal cut through upper cabinets) ─────────────
   old_upper_sp = model.entities.grep(Sketchup::SectionPlane).find { |sp|
@@ -644,7 +645,8 @@ def self.generate_assembly_scenes
     [0, 0, 1]
   )
   upper_sp.set_attribute('YH_SMART_LEADERS', 'section', "#{prefix}_UPPER")
-  model.active_section_plane = upper_sp
+  model.rendering_options['DisplaySectionPlanes'] = true
+  model.rendering_options['SectionCutHideFace']   = false
 
   upper_eye    = Geom::Point3d.new(center.x, center.y, upper_cut_z + 5000)
   upper_target = Geom::Point3d.new(center.x, center.y, upper_cut_z)
@@ -654,7 +656,7 @@ def self.generate_assembly_scenes
   tag_section.visible = true
 
   make_scene(model, "#{prefix}_SECTION_UPPER", nil)
-  model.active_section_plane = nil
+  model.rendering_options['DisplaySectionPlanes'] = false
 
   # ── VERTICAL SECTIONS (one per targeted cabinet) ──────────────────────
   vsection_targets.each_with_index do |cab_name, i|
@@ -679,7 +681,8 @@ def self.generate_assembly_scenes
       [0, 1, 0]
     )
     vsp.set_attribute('YH_SMART_LEADERS', 'section', "#{prefix}_V#{i + 1}")
-    model.active_section_plane = vsp
+    model.rendering_options['DisplaySectionPlanes'] = true
+    model.rendering_options['SectionCutHideFace']   = false
 
     # Camera: looking along Y axis at cabinet center
     v_eye = Geom::Point3d.new(cab_center.x, cab_center.y - 5000, cab_center.z)
@@ -690,7 +693,7 @@ def self.generate_assembly_scenes
     tag_section.visible = true
 
     make_scene(model, "#{prefix}_SECTION_V#{i + 1}", nil)
-    model.active_section_plane = nil
+    model.rendering_options['DisplaySectionPlanes'] = false
 
   end
 
