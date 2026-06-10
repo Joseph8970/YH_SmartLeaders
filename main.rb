@@ -506,16 +506,8 @@ def self.generate_assembly_scenes
   cam  = view.camera
 
   # Compute combined bounding box of all selected cabinets
-  combined_bb = sel.reduce(nil) do |bb, cab|
-    cb = cab.bounds
-    if bb.nil?
-      cb
-    else
-      merged = Sketchup::BoundingBox.new
-      merged.add(bb.min, bb.max, cb.min, cb.max)
-      merged
-    end
-  end
+  combined_bb = Geom::BoundingBox.new
+  sel.each { |cab| combined_bb.add(cab.bounds.min, cab.bounds.max) }
 
   center = combined_bb.center
 
