@@ -888,8 +888,8 @@ end
         right_edge_px = proj_x(world_max, cam_target, vp_cx, scale_denom)
         left_edge_px  = proj_x(world_min, cam_target, vp_cx, scale_denom)
 
-        # Dynamic text box width: ~0.068" per character, minimum 0.40"
-        text_w = [part_name.to_s.length * 0.068 + 0.04, 0.40].max
+        # ~0.095" per character for 12pt bold; minimum 0.55" for short names
+        text_w = [part_name.to_s.length * 0.095 + 0.06, 0.55].max
 
         elbow_drop  = leader_vert    # vertical segment length (user-configurable)
         horiz_run   = leader_horiz   # horizontal segment length (user-configurable)
@@ -964,10 +964,14 @@ end
           ty = elbow_y - text_h / 2.0
         end
 
-        # Clamp text box to stay inside this cabinet's projected bounds
-        pad = 0.03
-        tx  = [[tx, cab_min_px + pad].max, cab_max_px - text_w - pad].min
-        ty  = [[ty, cab_top_py + pad].max, cab_bot_py - text_h - pad].min
+        # Clamp text box inside cabinet bounds; fall back to viewport if cabinet too narrow
+        pad    = 0.03
+        x_lo   = cab_min_px + pad
+        x_hi   = cab_max_px - text_w - pad
+        tx     = x_hi >= x_lo ? [[tx, x_lo].max, x_hi].min : [[tx, vp_x + pad].max, vp_x + vp_w - text_w - pad].min
+        y_lo   = cab_top_py + pad
+        y_hi   = cab_bot_py - text_h - pad
+        ty     = y_hi >= y_lo ? [[ty, y_lo].max, y_hi].min : ty
 
         # After clamping tx, fix the path's last point so it still touches the text box.
         # For left-door / structural-left: connection is at right edge of text box (tx + text_w).
