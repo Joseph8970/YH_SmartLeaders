@@ -1000,12 +1000,16 @@ end
             text_bounds
           )
 
-          # Override the auto-generated leader with an explicit L-shaped path
+          # Override the auto-generated leader with an explicit L-shaped path.
+          # Capture the template-inherited style from the auto leader FIRST so
+          # arrow type, size, stroke, etc. survive the path replacement.
           if path_pts && path_pts.length >= 2
             begin
+              inherited_style = label.leader_line&.style
               pts   = path_pts.map { |x, y| Geom::Point2d.new(x, y) }
               lpath = Layout::Path.new(pts[0], pts[1])
               pts[2..].each { |pt| lpath.append_point(pt) } if pts.length > 2
+              lpath.style = inherited_style if inherited_style
               label.leader_line = lpath
             rescue => pe
               puts "  leader_line= err #{part_name}: #{pe.message}"
