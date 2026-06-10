@@ -46,21 +46,13 @@ def self.show_settings
 
   s = settings
 
-  offset = s[:leader_offset].inch
-  
-  text_gap = s[:text_offset].inch
-
   prompts = [
-    'Arrow Size (inches)',
-    'Leader Offset (inches)',
-    'RP Extra Offset (inches)',
-    'Text Offset (inches)'
+    'Leader Length (inches)  — how long each leader line is',
+    'Stagger Step (inches)   — gap between overlapping labels'
   ]
 
   defaults = [
-    s[:arrow_size],
     s[:leader_offset],
-    s[:rp_extra_offset],
     s[:text_offset]
   ]
 
@@ -72,31 +64,10 @@ def self.show_settings
 
   return unless values
 
-  model.set_attribute(
-    DICT,
-    'arrow_size',
-    values[0].to_f
-  )
+  model.set_attribute(DICT, 'leader_offset', values[0].to_f)
+  model.set_attribute(DICT, 'text_offset',   values[1].to_f)
 
-  model.set_attribute(
-    DICT,
-    'leader_offset',
-    values[1].to_f
-  )
-
-  model.set_attribute(
-    DICT,
-    'rp_extra_offset',
-    values[2].to_f
-  )
-
-  model.set_attribute(
-  DICT,
-  'text_offset',
-  values[3].to_f
-)
-
-  UI.messagebox('Settings saved.')
+  UI.messagebox('Settings saved. Regenerate leaders to apply.')
 
 end
 
@@ -154,17 +125,13 @@ def self.generate
 
   model.start_operation('Generate Leaders', true)
 
+  # Delete all previously generated leaders (identified by custom attribute)
+  model.entities.select { |e|
+    e.is_a?(Sketchup::Text) &&
+    e.get_attribute('YH_SMART_LEADERS', 'scene') == scene_name
+  }.each { |e| e.erase! if e.valid? }
+
   groups.each do |cabinet|
-
-    leader_group_name = "YH_LEADERS_#{scene_name}"
-
-old = cabinet.entities.grep(Sketchup::Group).find { |g|
-  g.name == leader_group_name
-}
-
-    old.erase! if old&.valid?
-
-    leader_group_name = "YH_LEADERS_#{scene_name}"
 
 if scene_name.include?('ELEV_NO_DOORS')
   leader_tag_name = 'TAG_ASM_ELEV_NO_DOORS'
@@ -190,306 +157,135 @@ cabinet_parts.each { |p| puts p.definition.name }
 
 
 
+    # Separate stagger counters per direction so leaders stay straight
+    stagger_x_pos  = 0  # parts on right side
+    stagger_x_neg  = 0  # parts on left side
+    stagger_y_pos  = 0  # parts at front
+    stagger_y_neg  = 0  # parts at back
+    stagger_z_pos  = 0  # parts at top
+    stagger_z_neg  = 0  # parts at bottom
+
     cabinet_parts.each do |part|
+
+  # Skip hidden components or components on hidden layers
+  next if part.hidden?
+  next if part.layer && !part.layer.visible?
 
   part_name = part.definition.name.to_s.upcase
 
-  next unless show_part?(part_name, scene_name)
-
   bb = part.bounds
 
+  s = settings
 
- s = settings
+  offset    = s[:leader_offset].inch   # controls leader line length
+  text_gap  = s[:text_offset].inch     # controls stagger step between labels
+  step      = text_gap                 # stagger uses Text Offset setting
 
-offset = s[:leader_offset].inch
+  cab_center  = cabinet.bounds.center
+  part_center = bb.center
 
-text_gap = s[:text_offset].inch
+  part_w = (bb.max.x - bb.min.x).abs
+  part_h = (bb.max.z - bb.min.z).abs
+  part_d = (bb.max.y - bb.min.y).abs
 
-if scene_name.include?('PLAN')
+  if scene_name.include?('PLAN')
 
-  case part_name
+    dx = part_center.x - cab_center.x
+    dy = part_center.y - cab_center.y
 
-  when /_LP$/
-
-    center = Geom::Point3d.new(
-      bb.max.x,
-      (bb.min.y + bb.max.y) / 2,
-      bb.max.z
-    )
-
-    line_pt = center.offset(X_AXIS, offset)
-
-    text_pt = line_pt.offset(X_AXIS, text_gap)
-
-  when /_RP$/
-
-  center = Geom::Point3d.new(
-    bb.min.x,
-    (bb.min.y + bb.max.y) / 2,
-    bb.max.z
-  )
-
-  rp_extra = s[:rp_extra_offset].inch
-
-  text_pt  = center.offset(X_AXIS.reverse, offset + rp_extra)
-
-  # line_pt is to the RIGHT of text_pt (approximating where text ends)
-  line_pt  = text_pt.offset(X_AXIS, text_gap)
-  
-
-  when /_BK$/
-
-    center = Geom::Point3d.new(
-      (bb.min.x + bb.max.x) / 2,
-      bb.min.y,
-      bb.max.z
-    )
-
-    line_pt = center.offset(Y_AXIS.reverse, offset)
-
-    text_pt = line_pt.offset(Y_AXIS.reverse, text_gap)
-
-  when /_B$/
-
-    center = Geom::Point3d.new(
-      (bb.min.x + bb.max.x) / 2,
-      (bb.min.y + bb.max.y) / 2,
-      bb.max.z
-    )
-
-    line_pt = center.offset(Y_AXIS.reverse, offset)
-
-    text_pt = line_pt.offset(Y_AXIS.reverse, text_gap)
-
-  when /_TP$/
-
-    center = Geom::Point3d.new(
-      (bb.min.x + bb.max.x) / 2,
-      (bb.min.y + bb.max.y) / 2,
-      bb.max.z
-    )
-
-    line_pt = center.offset(Y_AXIS, offset)
-
-    text_pt = line_pt.offset(Y_AXIS, text_gap)
-
-  when /_ST/
-
-    cab_center_y = cabinet.bounds.center.y
-
-    if bb.center.y > cab_center_y
-      # FRONT ST
-
-      center = Geom::Point3d.new(
-        (bb.min.x + bb.max.x) / 2,
-        bb.min.y,
-        bb.max.z
-      )
-
-      line_pt = center.offset(Y_AXIS.reverse, offset)
-
-      text_pt = line_pt.offset(Y_AXIS.reverse, text_gap)
-
+    if dx.abs >= dy.abs
+      if dx >= 0
+        # RIGHT side panel → anchor inner left face, leader goes left
+        center  = Geom::Point3d.new(bb.min.x, (bb.min.y + bb.max.y) / 2, bb.max.z)
+        dir     = X_AXIS.reverse
+        text_pt = center.offset(dir, offset + stagger_x_pos * step)
+        stagger_x_pos += 1
+      else
+        # LEFT side panel → anchor inner right face, leader goes right
+        center  = Geom::Point3d.new(bb.max.x, (bb.min.y + bb.max.y) / 2, bb.max.z)
+        dir     = X_AXIS
+        text_pt = center.offset(dir, offset + stagger_x_neg * step)
+        stagger_x_neg += 1
+      end
     else
-      # REAR ST
-
-      center = Geom::Point3d.new(
-        (bb.min.x + bb.max.x) / 2,
-        bb.max.y,
-        bb.max.z
-      )
-
-      line_pt = center.offset(Y_AXIS, offset)
-
-      text_pt = line_pt.offset(Y_AXIS, text_gap)
-
+      if dy >= 0
+        # FRONT part → anchor inner back face, leader goes back
+        center  = Geom::Point3d.new((bb.min.x + bb.max.x) / 2, bb.min.y, bb.max.z)
+        dir     = Y_AXIS.reverse
+        text_pt = center.offset(dir, offset + stagger_y_pos * step)
+        stagger_y_pos += 1
+      else
+        # BACK part → anchor inner front face, leader goes forward
+        center  = Geom::Point3d.new((bb.min.x + bb.max.x) / 2, bb.max.y, bb.max.z)
+        dir     = Y_AXIS
+        text_pt = center.offset(dir, offset + stagger_y_neg * step)
+        stagger_y_neg += 1
+      end
     end
 
-     when /_DR/
+  elsif scene_name.include?('ELEV')
 
-    center = Geom::Point3d.new(
-      (bb.min.x + bb.max.x) / 2,
-      bb.min.y,
-      bb.max.z
-    )
+    dx  = part_center.x - cab_center.x
+    dz  = part_center.z - cab_center.z
+    cab_w = (cabinet.bounds.max.x - cabinet.bounds.min.x).abs
+    cab_h = (cabinet.bounds.max.z - cabinet.bounds.min.z).abs
 
-    line_pt = center.offset(Y_AXIS.reverse, offset)
+    # Full-span parts (BK, TP, B) span >80% of cabinet width → vertical leader at a corner offset
+    is_full_span = part_w >= cab_w * 0.8
 
-    text_pt = line_pt.offset(Y_AXIS.reverse, text_gap)
+    if is_full_span
+      # Anchor at top-left quarter, leader goes up into open space
+      anchor_x = bb.min.x + (bb.max.x - bb.min.x) * 0.25
+      if dz >= 0
+        center  = Geom::Point3d.new(anchor_x, bb.min.y, bb.min.z)
+        dir     = Z_AXIS.reverse
+      else
+        center  = Geom::Point3d.new(anchor_x, bb.min.y, bb.max.z)
+        dir     = Z_AXIS
+      end
+      text_pt = center.offset(dir, offset + stagger_z_neg * step)
+      stagger_z_neg += 1
 
-     when /_DW/
-
-    center = Geom::Point3d.new(
-      (bb.min.x + bb.max.x) / 2,
-      bb.min.y,
-      bb.max.z
-    )
-
-    line_pt = center.offset(Y_AXIS.reverse, offset)
-
-    text_pt = line_pt.offset(Y_AXIS.reverse, text_gap)
-
-    when /_SH/
-
-    center = Geom::Point3d.new(
-      (bb.min.x + bb.max.x) / 2,
-      (bb.min.y + bb.max.y) / 2,
-      bb.max.z
-    )
-
-    line_pt = center.offset(Y_AXIS.reverse, offset)
-
-    text_pt = line_pt.offset(Y_AXIS.reverse, text_gap)
+    elsif part_w < part_h
+      # TALL/VERTICAL part (side panel LP, RP) → horizontal leader at mid-height inward
+      if dx >= 0
+        # Right panel → anchor inner left face, leader goes left
+        center  = Geom::Point3d.new(bb.min.x, bb.min.y, (bb.min.z + bb.max.z) / 2)
+        text_pt = center.offset(X_AXIS.reverse, offset + stagger_x_pos * step)
+        stagger_x_pos += 1
+      else
+        # Left panel → anchor inner right face, leader goes right
+        center  = Geom::Point3d.new(bb.max.x, bb.min.y, (bb.min.z + bb.max.z) / 2)
+        text_pt = center.offset(X_AXIS, offset + stagger_x_neg * step)
+        stagger_x_neg += 1
+      end
 
     else
+      # WIDE/HORIZONTAL part (shelf, stretcher) → vertical leader
+      # Alternate anchor X between 1/4 and 3/4 width so labels spread across cabinet
+      if stagger_z_pos.even?
+        anchor_x = bb.min.x + (bb.max.x - bb.min.x) * 0.25
+      else
+        anchor_x = bb.min.x + (bb.max.x - bb.min.x) * 0.75
+      end
 
-    center = bb.center
-    text_pt = center.offset(X_AXIS, offset)
+      if dz >= 0
+        # Top half → leader goes down into compartment below
+        center  = Geom::Point3d.new(anchor_x, bb.min.y, bb.min.z)
+        dir     = Z_AXIS.reverse
+      else
+        # Bottom half → leader goes up into compartment above
+        center  = Geom::Point3d.new(anchor_x, bb.min.y, bb.max.z)
+        dir     = Z_AXIS
+      end
+      text_pt = center.offset(dir, offset + step)
+      stagger_z_pos += 1
+    end
 
   end
 
-elsif scene_name.include?('ELEV')
-
-  has_fronts = !scene_name.include?('NO_DOORS')
-
-  puts "ELEV PART = #{part_name}"
-  puts "HAS_FRONTS = #{has_fronts}"
-
-  if has_fronts
-
-    next unless part_name.include?('_DR') ||
-                part_name.include?('_DW')
-
-  else
-
-  next if part_name.include?('_DR')
-  next if part_name.include?('_DW')
-
-end
-
-  case part_name
-
-when /_DR/
-
-  center = Geom::Point3d.new(
-    bb.min.x  + 2,
-    bb.min.y,
-    (bb.min.z + bb.max.z) / 2
-  )
-
-  line_pt = center.offset(X_AXIS, offset)
-
-  text_pt = line_pt.offset(X_AXIS, text_gap)
-
-when /_DW/
-
-  center = Geom::Point3d.new(
-    bb.min.x + 2,
-    bb.min.y,
-    (bb.min.z + bb.max.z) / 2
-  )
-
-  line_pt = center.offset(X_AXIS, offset)
-
-  text_pt = line_pt.offset(X_AXIS, text_gap)
-
-when /_LP$/
-
-  center = Geom::Point3d.new(
-    bb.max.x,
-    bb.min.y,
-    bb.max.z - 2
-  )
-
-  line_pt = center.offset(X_AXIS, offset)
-
-  text_pt = line_pt.offset(X_AXIS, text_gap)
-
-when /_RP$/
-
-  center = Geom::Point3d.new(
-    bb.min.x,
-    bb.min.y,
-    bb.max.z - 2
-  )
-
-  line_pt = center.offset(X_AXIS.reverse, offset)
-
-  text_pt = line_pt.offset(X_AXIS.reverse, text_gap)
-
-when /_BK$/
-
-  center = Geom::Point3d.new(
-    (bb.min.x + bb.max.x) / 2,
-    bb.min.y,
-    bb.min.z + 6
-  )
-
-  line_pt = center.offset(Z_AXIS, offset)
-
-  text_pt = line_pt.offset(Z_AXIS, text_gap)
-
-when /_TP$/
-
-  center = Geom::Point3d.new(
-    (bb.min.x + bb.max.x) / 2,
-    bb.min.y,
-    bb.min.z
-  )
-
-  line_pt = center.offset(Z_AXIS.reverse, offset)
-
-  text_pt = line_pt.offset(Z_AXIS.reverse, text_gap)
-
-when /_B$/
-
-  center = Geom::Point3d.new(
-    (bb.min.x + bb.max.x) / 2,
-    bb.min.y,
-    bb.max.z
-  )
-
-  line_pt = center.offset(Z_AXIS, offset)
-
-  text_pt = line_pt.offset(Z_AXIS, text_gap)
-
-when /_ST/
-
-  center = Geom::Point3d.new(
-    (bb.min.x + bb.max.x) / 2,
-    bb.min.y,
-    bb.min.z
-  )
-
-  line_pt = center.offset(Z_AXIS.reverse, offset)
-
-  text_pt = line_pt.offset(Z_AXIS.reverse, text_gap)
-
-when /_SH/
-
-  center = Geom::Point3d.new(
-    (bb.min.x + bb.max.x) / 2,
-    bb.min.y,
-    bb.max.z
-  )
-
-  line_pt = center.offset(Z_AXIS, offset)
-
-  text_pt = line_pt.offset(Z_AXIS, text_gap)
-
-else
-
-  next
-
-end
-
-  
-  end   # <-- closes PLAN/ELEV if
-
 next unless center
   next unless text_pt
-
-  line_pt = nil
 
   # Transform points from cabinet local space to world space
   t = cabinet.transformation
@@ -499,7 +295,12 @@ next unless center
   # Native SketchUp leader: arrow at component, text at world text position
   leader_vector = world_center.vector_to(world_text_pt)
   txt = ents.add_text(part_name, world_center, leader_vector)
-  txt.layer = leader_tag if txt
+  if txt
+    # Stamp with scene name so we can find and delete it later
+    txt.set_attribute('YH_SMART_LEADERS', 'scene', scene_name)
+    # Assign to scene tag so scene visibility controls which leaders show
+    txt.layer = leader_tag
+  end
 
 end
 
@@ -561,20 +362,21 @@ def self.update_all_leaders
 
   model.start_operation('Update All Leaders', true)
 
-  cabinets = []
+  # Delete all previously generated leaders across all scenes
+  to_erase = model.entities.select { |e|
+    e.is_a?(Sketchup::Text) &&
+    e.get_attribute('YH_SMART_LEADERS', 'scene')
+  }
+  to_erase.each { |e| e.erase! if e.valid? }
 
-  model.entities.grep(Sketchup::Group).each do |g|
+  # Use current selection if groups are selected, otherwise find all cabinets
+  selected = model.selection.grep(Sketchup::Group)
 
-    has_leaders = g.entities.grep(Sketchup::Group).any? { |x|
-      x.name.start_with?('YH_LEADERS_')
-    }
-
-    cabinets << g if has_leaders
-
+  if selected.empty?
+    UI.messagebox('Select one or more cabinet groups first.')
+    model.abort_operation
+    return
   end
-
-  model.selection.clear
-  cabinets.each { |c| model.selection.add(c) }
 
   generate
 
@@ -614,26 +416,25 @@ cmd_update.large_icon = File.join(__dir__, 'icons', 'update.svg')
 cmd_settings.small_icon = File.join(__dir__, 'icons', 'settings.svg')
 cmd_settings.large_icon = File.join(__dir__, 'icons', 'settings.svg')
 
-cmd_assembly = UI::Command.new('Generate Assembly Scenes') {
+cmd_cab_scenes = UI::Command.new('Generate Cabinet Scenes') {
   self.generate_assembly_scenes
 }
+cmd_cab_scenes.tooltip = 'Generate Cabinet Scenes — select cabinet groups first'
+cmd_cab_scenes.small_icon = File.join(__dir__, 'icons', 'generate.svg')
+cmd_cab_scenes.large_icon = File.join(__dir__, 'icons', 'generate.svg')
 
-cmd_assembly.tooltip = 'Generate Assembly Scenes'
-
-cmd_assembly_leaders = UI::Command.new(
-  'Generate Assembly Leaders'
-) {
+cmd_cab_leaders = UI::Command.new('Generate Cabinet Leaders & Dimensions') {
   self.generate_assembly_leaders
 }
-
-cmd_assembly_leaders.tooltip =
-  'Generate Assembly Leaders'
+cmd_cab_leaders.tooltip = 'Generate leaders and W×H×D dimensions for all cabinet scenes'
+cmd_cab_leaders.small_icon = File.join(__dir__, 'icons', 'update.svg')
+cmd_cab_leaders.large_icon = File.join(__dir__, 'icons', 'update.svg')
 
 toolbar.add_item(cmd_generate)
 toolbar.add_item(cmd_update)
 toolbar.add_item(cmd_settings)
-toolbar.add_item(cmd_assembly)
-toolbar.add_item(cmd_assembly_leaders)
+toolbar.add_item(cmd_cab_scenes)
+toolbar.add_item(cmd_cab_leaders)
 
 toolbar.restore
 
@@ -669,151 +470,171 @@ toolbar.restore
 def self.generate_assembly_scenes
 
   model = Sketchup.active_model
-
-  sel = model.selection.to_a
-
-  puts "SELECTED CABINETS = #{sel.size}"
-sel.each { |c| puts c.name }
+  sel   = model.selection.grep(Sketchup::Group)
 
   if sel.empty?
-    UI.messagebox("Select one or more cabinets first.")
+    UI.messagebox("Select one or more cabinet groups first.")
     return
   end
 
-  model.start_operation(
-    "Generate Assembly Scenes",
-    true
-  )
+  model.start_operation("Generate Cabinet Scenes", true)
 
-  tag_plan = model.layers["TAG_ASM_PLAN"] ||
-           model.layers.add("TAG_ASM_PLAN")
+  # Ensure scene tags exist
+  tag_elev        = model.layers["TAG_ASM_ELEV"]        || model.layers.add("TAG_ASM_ELEV")
+  tag_no_doors    = model.layers["TAG_ASM_ELEV_NO_DOORS"] || model.layers.add("TAG_ASM_ELEV_NO_DOORS")
+  tag_3d          = model.layers["TAG_ASM_3D"]           || model.layers.add("TAG_ASM_3D")
+  tag_3d_no_doors = model.layers["TAG_ASM_3D_NO_DOORS"]  || model.layers.add("TAG_ASM_3D_NO_DOORS")
 
-  tag_elev = model.layers["TAG_ASM_ELEV"] ||
-           model.layers.add("TAG_ASM_ELEV")
-
-  tag_no_doors = model.layers["TAG_ASM_ELEV_NO_DOORS"] ||
-               model.layers.add("TAG_ASM_ELEV_NO_DOORS")
+  doors_tag   = model.layers["TAG_DOORS"]
+  drawers_tag = model.layers["TAG_DRAWERS"]
 
   sel.each do |cabinet|
 
-  next unless cabinet.is_a?(Sketchup::Group)
+    cab_name = cabinet.name
+    puts "CABINET: #{cab_name}"
 
-  cab_name = cabinet.name
+    # Isolate this cabinet
+    sel.each { |c| c.hidden = true }
+    cabinet.hidden = false
 
-  
+    view = model.active_view
+    cam  = view.camera
 
-  puts "CABINET: #{cab_name}"
+    # ── ELEV (front, orthographic, doors+drawers visible) ──────────────
+    cam.perspective = false
+    cam.set(
+      cabinet.bounds.center.offset(Y_AXIS.reverse, 1000),
+      cabinet.bounds.center,
+      Z_AXIS
+    )
+    view.zoom(cabinet)
 
-  # Hide all selected cabinets
-  sel.each do |c|
-    next unless c.is_a?(Sketchup::Group)
-    c.hidden = true
+    doors_tag.visible   = true if doors_tag
+    drawers_tag.visible = true if drawers_tag
+    tag_elev.visible        = true
+    tag_no_doors.visible    = false
+    tag_3d.visible          = false
+    tag_3d_no_doors.visible = false
+
+    elev_scene = "ASM_#{cab_name}_ELEV"
+    model.pages.erase(model.pages[elev_scene]) if model.pages[elev_scene]
+    model.pages.add(elev_scene)
+    puts "CREATED: #{elev_scene}"
+
+    # ── ELEV_NO_DOORS (front, orthographic, doors+drawers hidden) ──────
+    doors_tag.visible   = false if doors_tag
+    drawers_tag.visible = false if drawers_tag
+    tag_elev.visible        = false
+    tag_no_doors.visible    = true
+    tag_3d.visible          = false
+    tag_3d_no_doors.visible = false
+
+    elev_nd_scene = "ASM_#{cab_name}_ELEV_NO_DOORS"
+    model.pages.erase(model.pages[elev_nd_scene]) if model.pages[elev_nd_scene]
+    model.pages.add(elev_nd_scene)
+    puts "CREATED: #{elev_nd_scene}"
+
+    # ── 3D (perspective, all parts visible, no leaders) ────────────────
+    cam.perspective = true
+    cam.set(
+      cabinet.bounds.center.offset(Geom::Vector3d.new(-1, -1, 0.6).normalize, 1000),
+      cabinet.bounds.center,
+      Z_AXIS
+    )
+    view.zoom(cabinet)
+
+    doors_tag.visible   = true if doors_tag
+    drawers_tag.visible = true if drawers_tag
+    tag_elev.visible        = false
+    tag_no_doors.visible    = false
+    tag_3d.visible          = true
+    tag_3d_no_doors.visible = false
+
+    scene_3d = "ASM_#{cab_name}_3D"
+    model.pages.erase(model.pages[scene_3d]) if model.pages[scene_3d]
+    model.pages.add(scene_3d)
+    puts "CREATED: #{scene_3d}"
+
+    # ── 3D_NO_DOORS (perspective, doors+drawers hidden, no leaders) ────
+    doors_tag.visible   = false if doors_tag
+    drawers_tag.visible = false if drawers_tag
+    tag_elev.visible        = false
+    tag_no_doors.visible    = false
+    tag_3d.visible          = false
+    tag_3d_no_doors.visible = true
+
+    scene_3d_nd = "ASM_#{cab_name}_3D_NO_DOORS"
+    model.pages.erase(model.pages[scene_3d_nd]) if model.pages[scene_3d_nd]
+    model.pages.add(scene_3d_nd)
+    puts "CREATED: #{scene_3d_nd}"
+
+    puts "CABINET FINISHED: #{cab_name}"
+
   end
 
-  # Show current cabinet
-  cabinet.hidden = false
-
-view = model.active_view
-cam  = view.camera
-
-# PLAN VIEW (TOP)
-cam.perspective = false
-
-cam.set(
-  cabinet.bounds.center.offset(Z_AXIS, 1000),
-  cabinet.bounds.center,
-  Y_AXIS
-)
-
-view.zoom(cabinet)
-
-plan_scene = "ASM_#{cab_name}_PLAN"
-
-  tag_plan.visible = true
-  tag_elev.visible = false
-  tag_no_doors.visible = false
-
-existing = model.pages[plan_scene]
-
-if existing
-  model.pages.erase(existing)
-end
-
-model.pages.add(plan_scene)
-
-
-puts "CREATED: #{plan_scene}"
-
-
-# ELEVATION VIEW (FRONT)
-cam.set(
-  cabinet.bounds.center.offset(Y_AXIS.reverse, 1000),
-  cabinet.bounds.center,
-  Z_AXIS
-)
-
-view.zoom(cabinet)
-
-elev_scene = "ASM_#{cab_name}_ELEV"
-
-  tag_plan.visible = false
-  tag_elev.visible = true
-  tag_no_doors.visible = false
-
-existing = model.pages[elev_scene]
-
-if existing
-  model.pages.erase(existing)
-end
-
-model.pages.add(elev_scene)
-
-
-puts "CREATED: #{elev_scene}"
-
-doors_tag = model.layers["TAG_DOORS"]
-
-if doors_tag
-  doors_tag.visible = false
-end
-
-drawer_tag = model.layers["TAG_DRAWERS"]
-
-drawer_tag.visible = false if drawer_tag
-
-
-elev_no_doors_scene = "ASM_#{cab_name}_ELEV_NO_DOORS"
-
-  tag_plan.visible = false
-  tag_elev.visible = false
-  tag_no_doors.visible = true
-
-existing = model.pages[elev_no_doors_scene]
-
-if existing
-  model.pages.erase(existing)
-end
-
-model.pages.add(elev_no_doors_scene)
-
-
-puts "CREATED: #{elev_no_doors_scene}"
-
-doors_tag.visible = true if doors_tag
-drawer_tag.visible = true if drawer_tag
-
-puts "CABINET FINISHED: #{cab_name}"
-
-
-end
-
-# Restore visibility
-sel.each do |c|
-  next unless c.is_a?(Sketchup::Group)
-  c.hidden = false
-end
+  # Restore all
+  sel.each { |c| c.hidden = false }
+  doors_tag.visible   = true if doors_tag
+  drawers_tag.visible = true if drawers_tag
 
   model.commit_operation
+
+  UI.messagebox("Scenes generated for #{sel.size} cabinet(s).")
+
+end
+
+# ── Dimensions: W × H × D on the cabinet bounding box ─────────────────────
+def self.generate_dimensions(cabinet, ents, leader_tag)
+
+  model = Sketchup.active_model
+  t     = cabinet.transformation
+  bb    = cabinet.bounds
+
+  s      = settings
+  offset = s[:leader_offset].inch
+
+  # World-space corners
+  min_w = bb.min.transform(t)
+  max_w = bb.max.transform(t)
+
+  # Width dimension (X axis) — placed below cabinet
+  w_start = Geom::Point3d.new(min_w.x, min_w.y, min_w.z)
+  w_end   = Geom::Point3d.new(max_w.x, min_w.y, min_w.z)
+  w_mid   = Geom::Point3d.new((min_w.x + max_w.x) / 2, min_w.y, min_w.z - offset)
+  width_in = ((max_w.x - min_w.x).abs / 1.0.inch).round(3)
+
+  ents.add_line(w_start, w_end)
+  txt = ents.add_text("W: #{width_in}\"", w_mid)
+  if txt
+    txt.set_attribute('YH_SMART_LEADERS', 'dim', true)
+    txt.layer = leader_tag
+  end
+
+  # Height dimension (Z axis) — placed to the right of cabinet
+  h_start = Geom::Point3d.new(max_w.x + offset, min_w.y, min_w.z)
+  h_end   = Geom::Point3d.new(max_w.x + offset, min_w.y, max_w.z)
+  h_mid   = Geom::Point3d.new(max_w.x + offset * 1.5, min_w.y, (min_w.z + max_w.z) / 2)
+  height_in = ((max_w.z - min_w.z).abs / 1.0.inch).round(3)
+
+  ents.add_line(h_start, h_end)
+  txt = ents.add_text("H: #{height_in}\"", h_mid)
+  if txt
+    txt.set_attribute('YH_SMART_LEADERS', 'dim', true)
+    txt.layer = leader_tag
+  end
+
+  # Depth dimension (Y axis) — placed below cabinet, offset from width
+  d_start = Geom::Point3d.new(min_w.x, min_w.y, min_w.z - offset * 2)
+  d_end   = Geom::Point3d.new(min_w.x, max_w.y, min_w.z - offset * 2)
+  d_mid   = Geom::Point3d.new(min_w.x, (min_w.y + max_w.y) / 2, min_w.z - offset * 2.5)
+  depth_in = ((max_w.y - min_w.y).abs / 1.0.inch).round(3)
+
+  ents.add_line(d_start, d_end)
+  txt = ents.add_text("D: #{depth_in}\"", d_mid)
+  if txt
+    txt.set_attribute('YH_SMART_LEADERS', 'dim', true)
+    txt.layer = leader_tag
+  end
 
 end
 
@@ -821,25 +642,33 @@ def self.generate_assembly_leaders
 
   model = Sketchup.active_model
 
-  asm_pages = []
+  model.start_operation('Generate Assembly Leaders', true)
 
-  model.pages.each do |page|
+  # Delete all previously generated leaders and dimensions
+  model.entities.select { |e|
+    e.is_a?(Sketchup::Text) && (
+      e.get_attribute('YH_SMART_LEADERS', 'scene') ||
+      e.get_attribute('YH_SMART_LEADERS', 'dim')
+    )
+  }.each { |e| e.erase! if e.valid? }
 
-    if page.name.start_with?('ASM_')
-      asm_pages << page
-    end
+  # Only process ELEV and ELEV_NO_DOORS — skip 3D scenes (no leaders/dims)
+  asm_pages = model.pages.select { |p|
+    p.name.start_with?('ASM_') &&
+    !p.name.end_with?('_3D') &&
+    !p.name.end_with?('_3D_NO_DOORS')
+  }
 
-  end
-
-  puts "ASSEMBLY SCENES = #{asm_pages.size}"
+  puts "SCENES TO ANNOTATE = #{asm_pages.size}"
 
   asm_pages.each do |page|
 
     puts "SCENE: #{page.name}"
 
-    parts = page.name.split('_')
+    model.pages.selected_page = page
+    page.update(255)
 
-    cab_name = parts[1]
+    cab_name = page.name.split('_')[1]
 
     cabinet = model.entities.grep(Sketchup::Group).find { |g|
       g.name == cab_name
@@ -847,15 +676,32 @@ def self.generate_assembly_leaders
 
     next unless cabinet
 
-    model.pages.selected_page = page
+    # Determine scene tag for this scene
+    leader_tag_name = if page.name.include?('ELEV_NO_DOORS')
+      'TAG_ASM_ELEV_NO_DOORS'
+    else
+      'TAG_ASM_ELEV'
+    end
+
+    leader_tag = model.layers[leader_tag_name] ||
+                 model.layers.add(leader_tag_name)
 
     model.selection.clear
     model.selection.add(cabinet)
 
+    # Generate leaders
     self.generate
 
+    # Generate W × H × D dimensions outside the bounding box
+    self.generate_dimensions(cabinet, model.entities, leader_tag)
+
+    page.update(255)
 
   end
+
+  model.commit_operation
+
+  UI.messagebox("Leaders and dimensions generated for #{asm_pages.size} scenes.")
 
 end
 
