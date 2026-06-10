@@ -888,9 +888,8 @@ end
         right_edge_px = proj_x(world_max, cam_target, vp_cx, scale_denom)
         left_edge_px  = proj_x(world_min, cam_target, vp_cx, scale_denom)
 
-        # LayOut requires explicit text bounds. Keep style from the template,
-        # but make the rectangle generous enough for bold/larger template fonts.
-        text_w = [part_name.to_s.length * 0.13 + 0.12, 0.75].max
+        # ~0.095" per character for 12pt bold; minimum 0.55" for short names
+        text_w = [part_name.to_s.length * 0.095 + 0.06, 0.55].max
 
         elbow_drop  = leader_vert    # vertical segment length (user-configurable)
         horiz_run   = leader_horiz   # horizontal segment length (user-configurable)
@@ -1004,15 +1003,10 @@ end
           # Override the auto-generated leader with an explicit L-shaped path.
           # Capture the template-inherited style from the auto leader FIRST so
           # arrow type, size, stroke, etc. survive the path replacement.
-          #
-          # LayOut's template arrow is normally on the END of the leader path.
-          # Our geometry is built as arrow -> elbow -> text for easy reasoning,
-          # so reverse it before assigning leader_line. This makes the custom
-          # path end at the component, where the template arrow should appear.
           if path_pts && path_pts.length >= 2
             begin
               inherited_style = label.leader_line&.style
-              pts   = path_pts.reverse.map { |x, y| Geom::Point2d.new(x, y) }
+              pts   = path_pts.map { |x, y| Geom::Point2d.new(x, y) }
               lpath = Layout::Path.new(pts[0], pts[1])
               pts[2..].each { |pt| lpath.append_point(pt) } if pts.length > 2
               lpath.style = inherited_style if inherited_style
