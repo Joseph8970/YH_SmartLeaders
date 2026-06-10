@@ -1001,22 +1001,22 @@ end
     end
 
     # ── Step 1: prefix + scale + leaders option + leader segment sizes ──
+    # ── Leader geometry (paper inches) — edit these two values to tune leaders ──
+    leader_vert  = 0.35   # vertical segment: arrow → elbow
+    leader_horiz = 0.75   # horizontal segment: elbow → text
+
     result = UI.inputbox(
       ['Scene prefix (e.g. A, B, KC)',
        'Scale denominator (e.g. 20 for 1:20, 48 for 1/4"=1\')',
-       'Add part leaders? (Y / N)',
-       'Leader vertical segment (inches on paper)',
-       'Leader horizontal segment (inches on paper)'],
-      ['A', '20', 'Y', '0.35', '0.75'],
+       'Add part leaders? (Y / N)'],
+      ['A', '20', 'Y'],
       'Assembly Package'
     )
     return unless result
 
-    prefix          = result[0].to_s.strip.upcase
-    scale_denom     = result[1].to_f
-    add_leaders     = result[2].to_s.strip.upcase.start_with?('Y')
-    leader_vert     = result[3].to_f.clamp(0.05, 5.0)   # elbow drop
-    leader_horiz    = result[4].to_f.clamp(0.05, 5.0)   # horizontal run to text
+    prefix      = result[0].to_s.strip.upcase
+    scale_denom = result[1].to_f
+    add_leaders = result[2].to_s.strip.upcase.start_with?('Y')
 
     if scale_denom <= 0
       UI.messagebox("Invalid scale.")
