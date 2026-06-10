@@ -823,8 +823,8 @@ end
     is_elev_no_door = scene_name.include?('ELEV_NO_DOORS')
     is_section_h    = scene_name =~ /_SECTION_(BASE|UPPER)$/
 
-    text_w     = 0.45
-    text_h     = 0.18
+    # text_w is calculated per-part below based on name length
+    text_h     = 0.20   # slightly taller for one line of text
     labels     = []
     placed_pts = []
 
@@ -865,19 +865,18 @@ end
         next if px < vp_x || px > vp_x + vp_w || py < vp_y || py > vp_y + vp_h
 
         # ── Leader position rules ─────────────────────────────────────────
-        # Strategy: create a TWO_SEGMENT label then override leader_line with an
-        # explicit Layout::Path of 3 points (arrow → elbow → text-connection).
-        # This gives us a guaranteed 90-degree L instead of Layout guessing the bend.
-        #
-        #   arrow_pt  ──(vertical)──  elbow_pt  ──(horizontal)──  text_conn_pt
-        #
+        # Explicit L-shaped path: arrow → elbow (vertical) → text connection (horizontal)
         arrow_px = px
         arrow_py = py
 
         right_edge_px = proj_x(world_max, cam_target, vp_cx, scale_denom)
         left_edge_px  = proj_x(world_min, cam_target, vp_cx, scale_denom)
 
+        # Dynamic text box width: ~0.068" per character, minimum 0.40"
+        text_w = [part_name.to_s.length * 0.068 + 0.04, 0.40].max
+
         elbow_drop = 0.35   # vertical distance arrow → elbow (inches on paper)
+        arrow_inset = 0.15  # arrow is this far INSIDE the door from the edge/divider
 
         # path_pts: [arrow, elbow, text_connection] — set per part type below
         path_pts = nil
@@ -890,28 +889,26 @@ end
           elbow_y = arrow_py + elbow_drop   # elbow is BELOW the arrow
 
           if is_left_door
-            # Arrow at divider (right/inner edge of left door).
-            # Leader goes DOWN then LEFT to text inside the door.
-            arrow_px   = right_edge_px
-            tx         = left_edge_px + 0.05
-            ty         = elbow_y - text_h / 2.0
-            # text connection point: right edge of text box at elbow height
+            # Arrow inset from the divider INTO the left door panel.
+            # Leader: down to elbow, then LEFT to text near outer edge.
+            arrow_px = right_edge_px - arrow_inset
+            tx       = left_edge_px + 0.05
+            ty       = elbow_y - text_h / 2.0
             path_pts = [
               [arrow_px, arrow_py],
               [arrow_px, elbow_y],
-              [tx + text_w, elbow_y]
+              [tx + text_w, elbow_y]   # connect to right edge of text box
             ]
           else
-            # Arrow at divider (left/inner edge of right door).
-            # Leader goes DOWN then RIGHT to text inside the door.
-            arrow_px   = left_edge_px
-            tx         = right_edge_px - text_w - 0.05
-            ty         = elbow_y - text_h / 2.0
-            # text connection point: left edge of text box at elbow height
+            # Arrow inset from the divider INTO the right door panel.
+            # Leader: down to elbow, then RIGHT to text near outer edge.
+            arrow_px = left_edge_px + arrow_inset
+            tx       = right_edge_px - text_w - 0.05
+            ty       = elbow_y - text_h / 2.0
             path_pts = [
               [arrow_px, arrow_py],
               [arrow_px, elbow_y],
-              [tx, elbow_y]
+              [tx, elbow_y]            # connect to left edge of text box
             ]
           end
 
