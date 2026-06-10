@@ -831,6 +831,21 @@ end
 
     cabinets.each do |cab|
       t = cab.transformation
+
+      # Project this cabinet's bounding box onto paper so we can clamp leaders inside it
+      cab_min_px = vp_cx + (cab.bounds.min.x - cam_target.x) / scale_denom
+      cab_max_px = vp_cx + (cab.bounds.max.x - cam_target.x) / scale_denom
+      if is_section_h
+        cab_top_py = vp_cy - (cab.bounds.max.y - cam_target.y) / scale_denom
+        cab_bot_py = vp_cy - (cab.bounds.min.y - cam_target.y) / scale_denom
+      else
+        cab_top_py = vp_cy - (cab.bounds.max.z - cam_target.z) / scale_denom
+        cab_bot_py = vp_cy - (cab.bounds.min.z - cam_target.z) / scale_denom
+      end
+      # Ensure min < max (mirrored cabinets can swap them)
+      cab_min_px, cab_max_px = [cab_min_px, cab_max_px].minmax
+      cab_top_py, cab_bot_py = [cab_top_py, cab_bot_py].minmax
+
       cab.entities.each do |ent|
         next unless ent.is_a?(Sketchup::ComponentInstance) || ent.is_a?(Sketchup::Group)
 
@@ -878,7 +893,7 @@ end
 
         elbow_drop  = leader_vert    # vertical segment length (user-configurable)
         horiz_run   = leader_horiz   # horizontal segment length (user-configurable)
-        arrow_inset = 0.10           # arrow inset from the divider edge into the door
+        arrow_inset = 0.05           # arrow inset from the divider edge into the door
 
         # path_pts: [arrow, elbow, text_connection] — set per part type below
         path_pts = nil
@@ -949,8 +964,22 @@ end
           ty = elbow_y - text_h / 2.0
         end
 
-        # Clamp text box inside viewport horizontally
-        tx = [[tx, vp_x + 0.02].max, vp_x + vp_w - text_w - 0.02].min
+        # Clamp text box to stay inside this cabinet's projected bounds
+        pad = 0.03
+        tx  = [[tx, cab_min_px + pad].max, cab_max_px - text_w - pad].min
+        ty  = [[ty, cab_top_py + pad].max, cab_bot_py - text_h - pad].min
+
+        # After clamping tx, fix the path's last point so it still touches the text box.
+        # For left-door / structural-left: connection is at right edge of text box (tx + text_w).
+        # For right-door / structural-right / drawer: connection is at left edge (tx).
+        if path_pts && path_pts.length >= 2
+          last = path_pts.last
+          if last[0] < arrow_px   # leader goes LEFT → connect to right edge of text box
+            path_pts[-1] = [tx + text_w, last[1]]
+          else                    # leader goes RIGHT → connect to left edge of text box
+            path_pts[-1] = [tx, last[1]]
+          end
+        end
 
         # Skip near-duplicate text positions
         next if placed_pts.any? { |ex, ey| (ex - tx).abs < 0.04 && (ey - ty).abs < 0.04 }
@@ -1002,8 +1031,8 @@ end
 
     # ── Step 1: prefix + scale + leaders option + leader segment sizes ──
     # ── Leader geometry (paper inches) — edit these two values to tune leaders ──
-    leader_vert  = 0.35   # vertical segment: arrow → elbow
-    leader_horiz = 0.75   # horizontal segment: elbow → text
+    leader_vert  = 0.15   # vertical segment: arrow → elbow
+    leader_horiz = 0.15   # horizontal segment: elbow → text
 
     result = UI.inputbox(
       ['Scene prefix (e.g. A, B, KC)',
