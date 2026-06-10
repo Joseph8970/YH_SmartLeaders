@@ -601,27 +601,27 @@ def self.generate_assembly_scenes
 
   make_scene(model, "#{prefix}_3D_NO_DOORS", nil)
 
-  # ── SECTION_BASE (horizontal cut through base cabinets) ───────────────
+  # ── SECTION_BASE (horizontal cut, top-down view) ──────────────────────
   cam.perspective = false
 
-  base_eye    = Geom::Point3d.new(center.x, center.y, base_cut_z + 5000)
-  base_target = Geom::Point3d.new(center.x, center.y, base_cut_z)
-  cam.set(base_eye, base_target, Y_AXIS)
-  view.zoom_extents
+  # Each section plane on its own tag so scenes control visibility
+  tag_sec_base  = model.layers["TAG_SEC_#{prefix}_BASE"]  || model.layers.add("TAG_SEC_#{prefix}_BASE")
+  tag_sec_upper = model.layers["TAG_SEC_#{prefix}_UPPER"] || model.layers.add("TAG_SEC_#{prefix}_UPPER")
 
-  # Create/replace section plane for base cut
-  old_base_sp = model.entities.grep(Sketchup::SectionPlane).find { |sp|
-    sp.get_attribute('YH_SMART_LEADERS', 'section') == "#{prefix}_BASE"
+  model.entities.grep(Sketchup::SectionPlane).each { |sp|
+    sp.erase! if sp.get_attribute('YH_SMART_LEADERS', 'section') == "#{prefix}_BASE" && sp.valid?
   }
-  old_base_sp.erase! if old_base_sp&.valid?
-
-  base_sp = model.entities.add_section_plane(
-    [center.x, center.y, base_cut_z],
-    [0, 0, 1]
-  )
+  base_sp = model.entities.add_section_plane([center.x, center.y, base_cut_z], [0, 0, -1])
   base_sp.set_attribute('YH_SMART_LEADERS', 'section', "#{prefix}_BASE")
-  model.rendering_options['DisplaySectionPlanes'] = true
-  model.rendering_options['SectionCutHideFace']   = false
+  base_sp.layer = tag_sec_base
+  base_sp.activate
+
+  cam.set(
+    Geom::Point3d.new(center.x, center.y, base_cut_z + 5000),
+    Geom::Point3d.new(center.x, center.y, base_cut_z),
+    Y_AXIS
+  )
+  view.zoom_extents
 
   doors_tag.visible   = true if doors_tag
   drawers_tag.visible = true if drawers_tag
@@ -630,33 +630,40 @@ def self.generate_assembly_scenes
   tag_3d.visible          = false
   tag_3d_no_doors.visible = false
   tag_section.visible     = true
+  tag_sec_base.visible    = true
+  tag_sec_upper.visible   = false
+
+  begin; model.rendering_options['DisplaySectionCuts'] = true; rescue; end
 
   make_scene(model, "#{prefix}_SECTION_BASE", nil)
-  model.rendering_options['DisplaySectionPlanes'] = false
 
-  # ── SECTION_UPPER (horizontal cut through upper cabinets) ─────────────
-  old_upper_sp = model.entities.grep(Sketchup::SectionPlane).find { |sp|
-    sp.get_attribute('YH_SMART_LEADERS', 'section') == "#{prefix}_UPPER"
+  # ── SECTION_UPPER (horizontal cut, top-down view) ─────────────────────
+  model.entities.grep(Sketchup::SectionPlane).each { |sp|
+    sp.erase! if sp.get_attribute('YH_SMART_LEADERS', 'section') == "#{prefix}_UPPER" && sp.valid?
   }
-  old_upper_sp.erase! if old_upper_sp&.valid?
-
-  upper_sp = model.entities.add_section_plane(
-    [center.x, center.y, upper_cut_z],
-    [0, 0, 1]
-  )
+  upper_sp = model.entities.add_section_plane([center.x, center.y, upper_cut_z], [0, 0, -1])
   upper_sp.set_attribute('YH_SMART_LEADERS', 'section', "#{prefix}_UPPER")
-  model.rendering_options['DisplaySectionPlanes'] = true
-  model.rendering_options['SectionCutHideFace']   = false
+  upper_sp.layer = tag_sec_upper
+  upper_sp.activate
 
-  upper_eye    = Geom::Point3d.new(center.x, center.y, upper_cut_z + 5000)
-  upper_target = Geom::Point3d.new(center.x, center.y, upper_cut_z)
-  cam.set(upper_eye, upper_target, Y_AXIS)
+  cam.set(
+    Geom::Point3d.new(center.x, center.y, upper_cut_z + 5000),
+    Geom::Point3d.new(center.x, center.y, upper_cut_z),
+    Y_AXIS
+  )
   view.zoom_extents
 
-  tag_section.visible = true
+  tag_section.visible   = true
+  tag_sec_base.visible  = false
+  tag_sec_upper.visible = true
+
+  begin; model.rendering_options['DisplaySectionCuts'] = true; rescue; end
 
   make_scene(model, "#{prefix}_SECTION_UPPER", nil)
-  model.rendering_options['DisplaySectionPlanes'] = false
+
+  # Hide both horizontal section planes after their scenes
+  tag_sec_base.visible  = false
+  tag_sec_upper.visible = false
 
   # ── VERTICAL SECTIONS (one per targeted cabinet) ──────────────────────
   vsection_targets.each_with_index do |cab_name, i|
@@ -667,33 +674,39 @@ def self.generate_assembly_scenes
       next
     end
 
-    cab_bb     = target_cab.bounds
-    cab_center = cab_bb.center
+    cab_center = target_cab.bounds.center
+    tag_sec_v  = model.layers["TAG_SEC_#{prefix}_V#{i + 1}"] ||
+                 model.layers.add("TAG_SEC_#{prefix}_V#{i + 1}")
 
-    old_vsp = model.entities.grep(Sketchup::SectionPlane).find { |sp|
-      sp.get_attribute('YH_SMART_LEADERS', 'section') == "#{prefix}_V#{i + 1}"
+    vkey = "#{prefix}_V#{i + 1}"
+    model.entities.grep(Sketchup::SectionPlane).each { |sp|
+      sp.erase! if sp.get_attribute('YH_SMART_LEADERS', 'section') == vkey && sp.valid?
     }
-    old_vsp.erase! if old_vsp&.valid?
+    vsp = model.entities.add_section_plane([cab_center.x, cab_center.y, cab_center.z], [1, 0, 0])
+    vsp.set_attribute('YH_SMART_LEADERS', 'section', vkey)
+    vsp.layer = tag_sec_v
+    vsp.activate
 
-    # Vertical plane cutting through cabinet center, perpendicular to X axis
-    vsp = model.entities.add_section_plane(
-      [cab_center.x, cab_center.y, cab_center.z],
-      [0, 1, 0]
-    )
-    vsp.set_attribute('YH_SMART_LEADERS', 'section', "#{prefix}_V#{i + 1}")
-    model.rendering_options['DisplaySectionPlanes'] = true
-    model.rendering_options['SectionCutHideFace']   = false
-
-    # Camera: looking along Y axis at cabinet center
-    v_eye = Geom::Point3d.new(cab_center.x, cab_center.y - 5000, cab_center.z)
     cam.perspective = false
-    cam.set(v_eye, cab_center, Z_AXIS)
-    view.zoom(target_cab)
+    cam.set(
+      Geom::Point3d.new(cab_center.x - 5000, cab_center.y, center.z),
+      Geom::Point3d.new(cab_center.x, cab_center.y, center.z),
+      Z_AXIS
+    )
+    view.zoom_extents
 
+    # Hide all other section tags, show only this one
+    tag_sec_base.visible  = false
+    tag_sec_upper.visible = false
+    vsection_targets.each_with_index { |_, j|
+      t = model.layers["TAG_SEC_#{prefix}_V#{j + 1}"]
+      t.visible = (j == i) if t
+    }
     tag_section.visible = true
 
+    begin; model.rendering_options['DisplaySectionCuts'] = true; rescue; end
+
     make_scene(model, "#{prefix}_SECTION_V#{i + 1}", nil)
-    model.rendering_options['DisplaySectionPlanes'] = false
 
   end
 
@@ -768,214 +781,341 @@ def self.generate_assembly_leaders
 end
 
 
+  # Raw projection of a world point to paper coords (no bounds check).
+  def self.proj_x(world_pt, cam_target, vp_cx, scale_denom)
+    vp_cx + (world_pt.x - cam_target.x) / scale_denom
+  end
+
+  def self.proj_y_elev(world_pt, cam_target, vp_cy, scale_denom)
+    vp_cy - (world_pt.z - cam_target.z) / scale_denom
+  end
+
+  # Classify a part name into a category symbol.
+  def self.part_cat(raw)
+    n = raw.to_s.upcase.sub(/^\d+_/, '')
+    return :door   if n.start_with?('DR')
+    return :drawer if n.start_with?('DW')
+    return :vs     if n.start_with?('VS')
+    return :tp     if n.start_with?('TP')
+    return :sh     if n.start_with?('SH')
+    return :bk     if n.start_with?('BK')
+    return :bp     if n.start_with?('BP')
+    return :lp     if n.start_with?('LP')
+    return :rp     if n.start_with?('RP')
+    return :st     if n.start_with?('ST')
+    return :b      if n =~ /^B\d*$/
+    :other
+  end
+
+  ELEV_SHOW    = %i[door drawer vs].freeze
+  NO_DOOR_SHOW = %i[tp sh bk bp lp rp st b].freeze
+
+  # Add Layout::Label leaders for visible parts in a scene viewport.
+  def self.add_layout_leaders(doc, page, layer, scene_name,
+                               vp_x, vp_y, vp_w, vp_h,
+                               cabinets, scale_denom, combined_bb)
+    return [] if scene_name =~ /_3D(_NO_DOORS)?$/
+
+    vp_cx      = vp_x + vp_w / 2.0
+    vp_cy      = vp_y + vp_h / 2.0
+    cam_target = combined_bb.center
+    is_elev         = scene_name =~ /_ELEV$/ ? true : false
+    is_elev_no_door = scene_name.include?('ELEV_NO_DOORS')
+    is_section_h    = scene_name =~ /_SECTION_(BASE|UPPER)$/
+
+    text_w     = 0.45
+    text_h     = 0.18
+    labels     = []
+    placed_pts = []
+
+    cabinets.each do |cab|
+      t = cab.transformation
+      cab.entities.each do |ent|
+        next unless ent.is_a?(Sketchup::ComponentInstance) || ent.is_a?(Sketchup::Group)
+
+        part_name = ent.is_a?(Sketchup::ComponentInstance) ? ent.definition.name : ent.name
+        next if part_name.to_s.strip.empty?
+
+        cat = part_cat(part_name)
+
+        # ── Scene-type visibility filter ──────────────────────────────────
+        if is_elev
+          next unless ELEV_SHOW.include?(cat)
+        elsif is_elev_no_door
+          next unless NO_DOOR_SHOW.include?(cat)
+        else
+          # Sections: skip doors/drawers
+          next if %i[door drawer].include?(cat)
+        end
+
+        world_center = ent.bounds.center.transform(t)
+        world_min    = ent.bounds.min.transform(t)
+        world_max    = ent.bounds.max.transform(t)
+
+        # Project component center
+        if is_section_h
+          px = vp_cx + (world_center.x - cam_target.x) / scale_denom
+          py = vp_cy - (world_center.y - cam_target.y) / scale_denom
+        else
+          px = proj_x(world_center, cam_target, vp_cx, scale_denom)
+          py = proj_y_elev(world_center, cam_target, vp_cy, scale_denom)
+        end
+
+        # Skip if outside viewport
+        next if px < vp_x || px > vp_x + vp_w || py < vp_y || py > vp_y + vp_h
+
+        # ── Leader position rules ─────────────────────────────────────────
+        arrow_px = px
+        arrow_py = py
+
+        # Project part edges used for door arrow/text placement
+        right_edge_px = proj_x(world_max, cam_target, vp_cx, scale_denom)
+        left_edge_px  = proj_x(world_min, cam_target, vp_cx, scale_denom)
+
+        # All text is placed at the SAME paper-Y as the arrow so the leader is
+        # a purely horizontal line (SINGLE_SEGMENT). TWO_SEGMENT with any Y
+        # difference becomes a diagonal — avoid it for in-viewport labels.
+        leader_type = Layout::Label::LEADER_LINE_TYPE_SINGLE_SEGMENT
+
+        case cat
+        when :door
+          # Name suffix: 5_DR1L = left door, 5_DR1R = right door
+          is_left_door = part_name =~ /L\d*$/i ||
+                         (!part_name.match?(/R\d*$/i) && world_center.x < cam_target.x)
+
+          if is_left_door
+            # Arrow at divider (inner/right edge of left door).
+            # Text inside the door near the outer/left edge — leader points right.
+            arrow_px = right_edge_px
+            tx = left_edge_px + 0.05
+          else
+            # Arrow at divider (inner/left edge of right door).
+            # Text inside the door near the outer/right edge — leader points left.
+            arrow_px = left_edge_px
+            tx = right_edge_px - text_w - 0.05
+          end
+          ty = py - text_h / 2.0   # same Y as arrow → guaranteed horizontal leader
+
+        when :drawer
+          # Arrow at drawer centre; text to the LEFT at same height.
+          tx = px - text_w - 0.20
+          ty = py - text_h / 2.0
+
+        else
+          # Structural parts: text to the less-crowded side at same height.
+          is_right_side = world_center.x >= cam_target.x
+          tx = is_right_side ? px + 0.20 : px - text_w - 0.20
+          ty = py - text_h / 2.0
+        end
+
+        # Clamp text box to stay within the viewport horizontally
+        tx = [[tx, vp_x + 0.02].max, vp_x + vp_w - text_w - 0.02].min
+
+        # Skip near-duplicate TEXT positions so L+R doors (same divider, opposite text) both appear
+        next if placed_pts.any? { |ex, ey| (ex - tx).abs < 0.04 && (ey - ty).abs < 0.04 }
+        placed_pts << [tx, ty]
+
+        target_pt   = Geom::Point2d.new(arrow_px, arrow_py)
+        text_bounds = Geom::Bounds2d.new(tx, ty, text_w, text_h)
+
+        begin
+          label = Layout::Label.new(
+            part_name,
+            leader_type,
+            target_pt,
+            text_bounds
+          )
+          doc.add_entity(label, layer, page)
+          labels << label
+          puts "  LABEL: #{part_name} @ arrow(#{arrow_px.round(2)},#{arrow_py.round(2)})"
+        rescue => e
+          puts "  Label err #{part_name}: #{e.message}"
+        end
+      end
+    end
+
+    labels
+  end
+
   def self.generate_assembly_package
 
-  model = Sketchup.active_model
+    model = Sketchup.active_model
 
-  if model.path.empty?
-    UI.messagebox("Save the SketchUp model first.")
-    return
-  end
+    if model.path.empty?
+      UI.messagebox("Save the SketchUp model first.")
+      return
+    end
 
-  template = UI.openpanel(
-  "Select Layout Template",
-  "",
-  "*.layout"
-)
+    # ── Step 1: prefix + scale + leaders option ─────────────────────────
+    result = UI.inputbox(
+      ['Scene prefix (e.g. A, B, KC)',
+       'Scale denominator (e.g. 20 for 1:20, 48 for 1/4"=1\')',
+       'Add part leaders? (Y / N)'],
+      ['A', '20', 'Y'],
+      'Assembly Package'
+    )
+    return unless result
 
-return unless template
+    prefix      = result[0].to_s.strip.upcase
+    scale_denom = result[1].to_f
+    add_leaders = result[2].to_s.strip.upcase.start_with?('Y')
 
-prompts = [
-  "Plan Scale (1:X)",
-  "Elevation Scale (1:X)",
-  "No Doors Scale (1:X)"
-]
+    if scale_denom <= 0
+      UI.messagebox("Invalid scale.")
+      return
+    end
+    scale = 1.0 / scale_denom
 
-defaults = [
-  "16",
-  "16",
-  "16"
-]
+    # ── Step 2: find matching scenes + let user pick which to include ───
+    all_scenes = model.pages.map(&:name).select { |n| n.start_with?("#{prefix}_") }
+    if all_scenes.empty?
+      UI.messagebox("No scenes found for prefix '#{prefix}'.\nGenerate assembly scenes first.")
+      return
+    end
 
-results = UI.inputbox(
-  prompts,
-  defaults,
-  "Assembly Package Settings"
-)
+    sel_result = UI.inputbox(
+      all_scenes,
+      Array.new(all_scenes.size, 'Y'),
+      "Select Scenes to Include (Y = yes, N = no)"
+    )
+    return unless sel_result
 
-return unless results
+    scene_names = all_scenes.select.with_index { |_, i| sel_result[i].to_s.strip.upcase.start_with?('Y') }
+    if scene_names.empty?
+      UI.messagebox("No scenes selected.")
+      return
+    end
 
-plan_scale_denom,
-elev_scale_denom,
-no_doors_scale_denom = results.map(&:to_f)
+    # ── Step 3: template ────────────────────────────────────────────────
+    template_path = UI.openpanel("Select Layout Template", "", "Layout Files|*.layout|")
+    return unless template_path
 
-plan_scale     = 1.0 / plan_scale_denom
-elev_scale     = 1.0 / elev_scale_denom
-no_doors_scale = 1.0 / no_doors_scale_denom
+    # ── Step 4: output path ─────────────────────────────────────────────
+    default_name = File.basename(model.path, '.skp') + "_#{prefix}.layout"
+    output_path  = UI.savepanel("Save Layout Package", File.dirname(model.path), default_name)
+    return unless output_path
+    output_path += '.layout' unless output_path.end_with?('.layout')
 
-begin
+    # ── Step 5: build Layout document ───────────────────────────────────
+    begin
+      doc   = Layout::Document.open(template_path)
+      page  = doc.pages.first
+      layer = doc.layers.first
 
-  doc = Layout::Document.open(template)
+      # Compute model bounding box from all top-level groups
+      all_groups = model.entities.grep(Sketchup::Group)
+      combined_bb = Geom::BoundingBox.new
+      all_groups.each { |g| combined_bb.add(g.bounds.min, g.bounds.max) }
+      bb_w = (combined_bb.max.x - combined_bb.min.x).to_f
+      bb_h = (combined_bb.max.z - combined_bb.min.z).to_f
+      bb_d = (combined_bb.max.y - combined_bb.min.y).to_f
+      pad  = 1.15
 
-    page = doc.pages.first
+      gap    = 0.5
+      margin = 1.0
+      cur_x  = margin
+      cur_y  = margin
+      row_h  = 0.0
+      page_w = doc.page_info.width - margin * 2
 
-    scenes = model.pages.map(&:name).grep(/^ASM_/)
+      placed_vps = []  # track positions for leader placement
 
-    puts "ASM SCENES FOUND = #{scenes.size}"
+      scene_names.each do |scene_name|
+        is_3d        = scene_name =~ /_3D(_NO_DOORS)?$/
+        is_section_h = scene_name =~ /_SECTION_(BASE|UPPER)$/
+        is_section_v = scene_name =~ /_SECTION_V/
 
-    cabinets = scenes.map { |name|
+        if is_3d
+          vp_w = 5.0
+          vp_h = 4.0
+        elsif is_section_h
+          vp_w = [(bb_w * pad / scale_denom), 2.0].max
+          vp_h = [(bb_d * pad / scale_denom), 2.0].max
+        elsif is_section_v
+          vp_w = [(bb_d * pad / scale_denom), 2.0].max
+          vp_h = [(bb_h * pad / scale_denom), 2.0].max
+        else
+          vp_w = [(bb_w * pad / scale_denom), 2.0].max
+          vp_h = [(bb_h * pad / scale_denom), 2.0].max
+        end
 
-  name[/ASM_(.+?)_/, 1]
+        if cur_x + vp_w > margin + page_w && cur_x > margin
+          cur_y += row_h + gap
+          cur_x  = margin
+          row_h  = 0.0
+        end
 
-}.uniq.sort
-
-puts "CABINETS FOUND:"
-puts cabinets.inspect
-
-template_page = page
-
-cabinets.each_slice(3).with_index do |cab_group, page_index|
-
-  if page_index == 0
-
-  else
-
-    page = doc.pages.add(
-  "ASM_#{cab_group.first}_TO_#{cab_group.last}"
-)
-
-  end
-
-  puts ""
-  puts "PAGE #{page_index + 1}"
-  puts cab_group.inspect
-
-  cab_group.each_with_index do |cab, col|
-
-    x = 1.0 + (col * 5.0)
-
-title = Layout::FormattedText.new(
-  "CABINET #{cab}",
-  Geom::Bounds2d.new(
-    Geom::Point2d.new(x, 10),
-    Geom::Point2d.new(x + 3.0, 10.25)
-  )
-)
-
-doc.add_entity(
-  title,
-  doc.layers[3],
-  page
-)
-
-    views = [
-
-      ["ASM_#{cab}_PLAN",          x, 7.25],
-      ["ASM_#{cab}_ELEV",          x, 4.125],
-      ["ASM_#{cab}_ELEV_NO_DOORS", x, 1.0]
-
-    ]
-
-    views.each do |scene_name, vx, vy|
-
-view_label =
-  if scene_name.end_with?("_PLAN")
-    "PLAN"
-  elsif scene_name.end_with?("_ELEV_NO_DOORS")
-    "ELEVATION - NO DOORS"
-  elsif scene_name.end_with?("_ELEV")
-    "ELEVATION"
-  else
-    ""
-  end
-
-label = Layout::FormattedText.new(
-  view_label,
-  Geom::Bounds2d.new(
-    Geom::Point2d.new(vx, vy + 2.55),
-    Geom::Point2d.new(vx + 4.0, vy + 2.80)
-  )
-)
-
-doc.add_entity(
-  label,
-  doc.layers[3],
-  page
-)
-
-      vp = Layout::SketchUpModel.new(
-        model.path,
-        Geom::Bounds2d.new(
-          Geom::Point2d.new(vx, vy),
-          Geom::Point2d.new(vx + 4.0, vy + 2.5)
+        bounds = Geom::Bounds2d.new(
+          Geom::Point2d.new(cur_x, cur_y),
+          Geom::Point2d.new(cur_x + vp_w, cur_y + vp_h)
         )
-      )
 
-      scene_index = vp.scenes.index(scene_name)
+        vp = Layout::SketchUpModel.new(model.path, bounds)
+        scene_idx = vp.scenes.index(scene_name)
+        unless scene_idx
+          puts "SKIP: #{scene_name} not found"
+          next
+        end
 
-      next unless scene_index
+        vp.current_scene = scene_idx
+        unless is_3d
+          begin
+            vp.scale = scale
+            vp.preserve_scale_on_resize = true
+          rescue => e
+            puts "Scale skipped for #{scene_name}: #{e.message}"
+          end
+        end
 
-      vp.current_scene = scene_index
-  
+        doc.add_entity(vp, layer, page)
+        puts "PLACED: #{scene_name} (#{vp_w.round(2)}\" × #{vp_h.round(2)}\")"
 
-      if scene_name.end_with?("_PLAN")
-        vp.scale = plan_scale
+        placed_vps << { scene: scene_name, vp: vp,
+                        x: cur_x, y: cur_y, w: vp_w, h: vp_h }
 
-      elsif scene_name.end_with?("_ELEV")
-        vp.scale = elev_scale
-
-      elsif scene_name.end_with?("_ELEV_NO_DOORS")
-        vp.scale = no_doors_scale
+        cur_x += vp_w + gap
+        row_h  = [row_h, vp_h].max
       end
-      vp.preserve_scale_on_resize = true
 
-      doc.add_entity(
-        vp,
-        doc.layers[3],
-        page
-      )
+      # ── Phase 3: add part leaders and group with viewport ────────────────
+      if add_leaders
+        placed_vps.each do |info|
+          next if info[:scene] =~ /_3D(_NO_DOORS)?$/
 
-      puts "PLACED #{scene_name}"
+          labels = add_layout_leaders(
+            doc, page, layer,
+            info[:scene], info[:x], info[:y], info[:w], info[:h],
+            all_groups, scale_denom, combined_bb
+          )
 
+          # Group viewport + labels so they move together
+          entities_to_group = [info[:vp]] + labels
+          unless entities_to_group.empty?
+            begin
+              grp = Layout::Group.new(entities_to_group)
+              doc.add_entity(grp, layer, page)
+              # Move original vp and labels out of doc (they're now inside group)
+            rescue
+              # Grouping not supported this way — entities stay ungrouped
+            end
+          end
+        end
+      end
+
+      doc.save(output_path)
+
+      # Open in Layout
+      system("start \"\" \"#{output_path}\"")
+
+      UI.messagebox("#{scene_names.size} viewports placed at 1:#{scale_denom.to_i} scale.\nFile: #{output_path}")
+
+    rescue => e
+      UI.messagebox("ERROR creating Layout file:\n#{e.message}")
+      puts e.message
+      puts e.backtrace.first(10).join("\n")
     end
 
   end
-
-end
-
-    out_file = File.join(
-      File.dirname(model.path),
-      "AssemblyPackage.layout"
-    )
-
-    doc.save(out_file)
-
-pdf_file = File.join(
-  File.dirname(model.path),
-  "AssemblyPackage.pdf"
-)
-
-doc.export(pdf_file)
-
-puts "PDF CREATED:"
-puts pdf_file
-
-    UI.messagebox(
-      "Created:\n#{out_file}"
-    )
-
-  rescue => e
-
-    UI.messagebox(
-      "ERROR:\n#{e.message}"
-    )
-
-    puts e.message
-    puts e.backtrace
-
-  end
-
-end
 
   file_loaded(__FILE__)
 
