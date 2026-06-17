@@ -880,110 +880,56 @@ end
         # Skip if outside viewport
         next if px < vp_x || px > vp_x + vp_w || py < vp_y || py > vp_y + vp_h
 
-        # ── Leader position rules ─────────────────────────────────────────
-        # Explicit L-shaped path: arrow → elbow (vertical) → text connection (horizontal)
+        # ── Leader position ───────────────────────────────────────────────
+        # Do NOT override leader_line — that breaks Layout's interactive
+        # stretch handles and text editing. Use target_pt + text_bounds only;
+        # Layout's TWO_SEGMENT draws the leader between them automatically.
         arrow_px = px
         arrow_py = py
 
         right_edge_px = proj_x(world_max, cam_target, vp_cx, scale_denom)
         left_edge_px  = proj_x(world_min, cam_target, vp_cx, scale_denom)
 
-        # ~0.095" per character for 12pt bold; minimum 0.55" for short names
+        # ~0.095" per character for 12pt bold; minimum 0.55"
         text_w = [part_name.to_s.length * 0.095 + 0.06, 0.55].max
 
-        elbow_drop  = leader_vert    # vertical segment length (user-configurable)
-        horiz_run   = leader_horiz   # horizontal segment length (user-configurable)
-        arrow_inset = 0.05           # arrow inset from the divider edge into the door
-
-        # path_pts: [arrow, elbow, text_connection] — set per part type below
-        path_pts = nil
+        elbow_drop  = leader_vert   # vertical offset arrow → text
+        horiz_run   = leader_horiz  # horizontal offset arrow → text
+        arrow_inset = 0.05
 
         case cat
         when :door
           is_left_door = part_name =~ /L\d*$/i ||
                          (!part_name.match?(/R\d*$/i) && world_center.x < cam_target.x)
 
-          elbow_y = arrow_py + elbow_drop   # elbow is BELOW the arrow
-
           if is_left_door
-            # Arrow inset into left door; leader goes DOWN then LEFT by horiz_run.
-            arrow_px    = right_edge_px - arrow_inset
-            elbow_pt_x  = arrow_px
-            text_conn_x = arrow_px - horiz_run          # left end of horizontal run
-            tx          = text_conn_x - text_w          # text box left of connection
-            ty          = elbow_y - text_h / 2.0
-            path_pts = [
-              [arrow_px,    arrow_py],
-              [elbow_pt_x,  elbow_y],
-              [text_conn_x, elbow_y]
-            ]
+            arrow_px = right_edge_px - arrow_inset
+            tx = arrow_px - horiz_run - text_w
+            ty = arrow_py + elbow_drop - text_h / 2.0
           else
-            # Arrow inset into right door; leader goes DOWN then RIGHT by horiz_run.
-            arrow_px    = left_edge_px + arrow_inset
-            elbow_pt_x  = arrow_px
-            text_conn_x = arrow_px + horiz_run          # right end of horizontal run
-            tx          = text_conn_x                   # text box right of connection
-            ty          = elbow_y - text_h / 2.0
-            path_pts = [
-              [arrow_px,    arrow_py],
-              [elbow_pt_x,  elbow_y],
-              [text_conn_x, elbow_y]
-            ]
+            arrow_px = left_edge_px + arrow_inset
+            tx = arrow_px + horiz_run
+            ty = arrow_py + elbow_drop - text_h / 2.0
           end
 
         when :drawer
-          # Arrow at drawer centre; leader goes LEFT then TEXT (single horizontal).
-          tx = px - text_w - 0.20
+          tx = px - text_w - horiz_run
           ty = py - text_h / 2.0
-          path_pts = [
-            [arrow_px, arrow_py],
-            [tx + text_w, arrow_py]
-          ]
 
         else
-          # Structural parts: leader goes DOWN then to the less-crowded side.
           is_right_side = world_center.x >= cam_target.x
-          elbow_y = arrow_py + elbow_drop
-          if is_right_side
-            text_conn_x = arrow_px + horiz_run
-            tx = text_conn_x
-            path_pts = [
-              [arrow_px, arrow_py],
-              [arrow_px, elbow_y],
-              [text_conn_x, elbow_y]
-            ]
-          else
-            text_conn_x = arrow_px - horiz_run
-            tx = text_conn_x - text_w
-            path_pts = [
-              [arrow_px, arrow_py],
-              [arrow_px, elbow_y],
-              [text_conn_x, elbow_y]
-            ]
-          end
-          ty = elbow_y - text_h / 2.0
+          tx = is_right_side ? px + horiz_run : px - text_w - horiz_run
+          ty = py + elbow_drop - text_h / 2.0
         end
 
         # Clamp text box inside cabinet bounds; fall back to viewport if cabinet too narrow
-        pad    = 0.03
-        x_lo   = cab_min_px + pad
-        x_hi   = cab_max_px - text_w - pad
-        tx     = x_hi >= x_lo ? [[tx, x_lo].max, x_hi].min : [[tx, vp_x + pad].max, vp_x + vp_w - text_w - pad].min
-        y_lo   = cab_top_py + pad
-        y_hi   = cab_bot_py - text_h - pad
-        ty     = y_hi >= y_lo ? [[ty, y_lo].max, y_hi].min : ty
-
-        # After clamping tx, fix the path's last point so it still touches the text box.
-        # For left-door / structural-left: connection is at right edge of text box (tx + text_w).
-        # For right-door / structural-right / drawer: connection is at left edge (tx).
-        if path_pts && path_pts.length >= 2
-          last = path_pts.last
-          if last[0] < arrow_px   # leader goes LEFT → connect to right edge of text box
-            path_pts[-1] = [tx + text_w, last[1]]
-          else                    # leader goes RIGHT → connect to left edge of text box
-            path_pts[-1] = [tx, last[1]]
-          end
-        end
+        pad  = 0.03
+        x_lo = cab_min_px + pad
+        x_hi = cab_max_px - text_w - pad
+        tx   = x_hi >= x_lo ? [[tx, x_lo].max, x_hi].min : [[tx, vp_x + pad].max, vp_x + vp_w - text_w - pad].min
+        y_lo = cab_top_py + pad
+        y_hi = cab_bot_py - text_h - pad
+        ty   = y_hi >= y_lo ? [[ty, y_lo].max, y_hi].min : ty
 
         # Skip near-duplicate text positions
         next if placed_pts.any? { |ex, ey| (ex - tx).abs < 0.04 && (ey - ty).abs < 0.04 }
@@ -1000,19 +946,7 @@ end
             text_bounds
           )
 
-          # 1. Override leader geometry with explicit L-shaped path
-          if path_pts && path_pts.length >= 2
-            begin
-              pts   = path_pts.map { |x, y| Geom::Point2d.new(x, y) }
-              lpath = Layout::Path.new(pts[0], pts[1])
-              pts[2..].each { |pt| lpath.append_point(pt) } if pts.length > 2
-              label.leader_line = lpath
-            rescue => pe
-              puts "  leader_line= err #{part_name}: #{pe.message}"
-            end
-          end
-
-          # 2. Force arrow type 1 (ARROW_FILLED_TRIANGLE) at the component end
+          # Force filled-triangle arrow at the component end
           begin
             s = label.style
             s.end_arrow_type = Layout::Style::ARROW_FILLED_TRIANGLE
@@ -1022,7 +956,6 @@ end
             puts "  arrow err #{part_name}: #{ae.message}"
           end
 
-          # 3. Add to document last — nothing can reset our settings after this
           doc.add_entity(label, layer, page)
           labels << label
 
