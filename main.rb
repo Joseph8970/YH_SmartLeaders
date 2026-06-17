@@ -1000,9 +1000,13 @@ end
             text_bounds
           )
 
-          # Override the auto-generated leader with an explicit L-shaped path.
-          # Capture the template-inherited style from the auto leader FIRST so
-          # arrow type, size, stroke, etc. survive the path replacement.
+          # Add to document FIRST so Layout applies the template's default
+          # style (arrow type, size, stroke, font, etc.) to the label.
+          doc.add_entity(label, layer, page)
+          labels << label
+
+          # Now read the template-applied leader style and use it on our
+          # explicit L-shaped path so arrows and stroke carry through.
           if path_pts && path_pts.length >= 2
             begin
               inherited_style = label.leader_line&.style
@@ -1016,9 +1020,6 @@ end
             end
           end
 
-
-          doc.add_entity(label, layer, page)
-          labels << label
           puts "  LABEL: #{part_name} @ arrow(#{arrow_px.round(2)},#{arrow_py.round(2)})"
         rescue => e
           puts "  Label err #{part_name}: #{e.message}"
