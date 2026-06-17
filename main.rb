@@ -1005,19 +1005,26 @@ end
           doc.add_entity(label, layer, page)
           labels << label
 
-          # Now read the template-applied leader style and use it on our
-          # explicit L-shaped path so arrows and stroke carry through.
+          # Replace auto leader with explicit L-shaped path, then force arrow.
           if path_pts && path_pts.length >= 2
             begin
-              inherited_style = label.leader_line&.style
               pts   = path_pts.map { |x, y| Geom::Point2d.new(x, y) }
               lpath = Layout::Path.new(pts[0], pts[1])
               pts[2..].each { |pt| lpath.append_point(pt) } if pts.length > 2
-              lpath.style = inherited_style if inherited_style
               label.leader_line = lpath
             rescue => pe
               puts "  leader_line= err #{part_name}: #{pe.message}"
             end
+          end
+
+          # Force arrow type 1 (ARROW_FILLED_TRIANGLE) at the component end.
+          begin
+            s = label.style
+            s.end_arrow_type = Layout::Style::ARROW_FILLED_TRIANGLE
+            s.end_arrow_size = 0.25
+            label.style = s
+          rescue => ae
+            puts "  arrow err #{part_name}: #{ae.message}"
           end
 
           puts "  LABEL: #{part_name} @ arrow(#{arrow_px.round(2)},#{arrow_py.round(2)})"
