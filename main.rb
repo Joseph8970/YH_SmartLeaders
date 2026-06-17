@@ -1000,12 +1000,7 @@ end
             text_bounds
           )
 
-          # Add to document FIRST so Layout applies the template's default
-          # style (arrow type, size, stroke, font, etc.) to the label.
-          doc.add_entity(label, layer, page)
-          labels << label
-
-          # Replace auto leader with explicit L-shaped path, then force arrow.
+          # 1. Override leader geometry with explicit L-shaped path
           if path_pts && path_pts.length >= 2
             begin
               pts   = path_pts.map { |x, y| Geom::Point2d.new(x, y) }
@@ -1017,7 +1012,7 @@ end
             end
           end
 
-          # Force arrow type 1 (ARROW_FILLED_TRIANGLE) at the component end.
+          # 2. Force arrow type 1 (ARROW_FILLED_TRIANGLE) at the component end
           begin
             s = label.style
             s.end_arrow_type = Layout::Style::ARROW_FILLED_TRIANGLE
@@ -1026,6 +1021,10 @@ end
           rescue => ae
             puts "  arrow err #{part_name}: #{ae.message}"
           end
+
+          # 3. Add to document last — nothing can reset our settings after this
+          doc.add_entity(label, layer, page)
+          labels << label
 
           puts "  LABEL: #{part_name} @ arrow(#{arrow_px.round(2)},#{arrow_py.round(2)})"
         rescue => e
