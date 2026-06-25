@@ -945,9 +945,21 @@ end
             target_pt,
             text_bounds
           )
+
+          # Force filled-triangle arrow at the component end
+          begin
+            s = label.style
+            s.end_arrow_type = Layout::Style::ARROW_FILLED_TRIANGLE
+            s.end_arrow_size = 0.25
+            label.style = s
+          rescue => ae
+            puts "  arrow err #{part_name}: #{ae.message}"
+          end
+
           doc.add_entity(label, layer, page)
           labels << label
-          puts "  LABEL: #{part_name}"
+
+          puts "  LABEL: #{part_name} @ arrow(#{arrow_px.round(2)},#{arrow_py.round(2)})"
         rescue => e
           puts "  Label err #{part_name}: #{e.message}"
         end
